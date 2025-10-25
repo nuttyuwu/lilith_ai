@@ -21,9 +21,10 @@ def main():
     root.title("Lilith")
     root.configure(bg='black')
     
-    # remove window decorations but keep it movable
+    # allow the window to be resizable and use native decorations so users can
+    # resize it with the window manager. Keep always-on-top behavior.
     try:
-        root.overrideredirect(True)
+        root.overrideredirect(False)
     except Exception:
         pass
     try:
@@ -31,64 +32,91 @@ def main():
     except Exception:
         pass
 
-    # Start position
-    root.geometry("+1200+200")  # only position, size will adjust to image
-
-    # Make window draggable by clicking anywhere
-    def start_move(event):
-        root.x = event.x
-        root.y = event.y
-
-    def do_move(event):
-        deltax = event.x - root.x
-        deltay = event.y - root.y
-        x = root.winfo_x() + deltax
-        y = root.winfo_y() + deltay
-        root.geometry(f"+{x}+{y}")
+    # Start position and allow resizing
+    root.geometry("400x600+1200+200")
+    root.resizable(True, True)
 
     lbl = tk.Label(root, bg='black', borderwidth=0, highlightthickness=0)
-    lbl.pack(fill=None, expand=False)  # don't expand to fill
-    
-    # Bind drag events to both root and label
-    for widget in (root, lbl):
-        widget.bind('<Button-1>', start_move)
-        widget.bind('<B1-Motion>', do_move)
+    lbl.pack(fill=tk.BOTH, expand=True)
+
+    # Track resize events and rescale the current image to fit the window
+    resize_job = None
+    def on_resize(event):
+        nonlocal resize_job
+        # debounce rapid resize events
+        if resize_job:
+            root.after_cancel(resize_job)
+        resize_job = root.after(100, lambda: rescale_to_window())
+
+    def rescale_to_window():
+        nonlocal img_obj, orig_img
+        try:
+            w = lbl.winfo_width()
+            h = lbl.winfo_height()
+            if w <= 1 or h <= 1:
+                return
+            if orig_img is None:
+                return
+            # scale orig_img to fit within w,h
+            iw, ih = orig_img.size
+            scale = min(w/iw, h/ih)
+            new_w = max(1, int(iw * scale))
+            new_h = max(1, int(ih * scale))
+            img = orig_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            img_obj = ImageTk.PhotoImage(img)
+            lbl.config(image=img_obj)
+        except Exception:
+            pass
+
+    root.bind('<Configure>', on_resize)
 
     last_mtime = None
     img_obj = None
+    orig_img = None
 
-    def scale_image(img_path):
-        """Scale the image to fit target size while preserving aspect ratio"""
+    def scale_image(img_path, target_w=TARGET_WIDTH, target_h=TARGET_HEIGHT):
+        """Return a PhotoImage scaled to target_w x target_h preserving aspect."""
         with Image.open(img_path) as img:
-            # Calculate scaling factor to fit within target bounds
             width, height = img.size
-            scale_w = TARGET_WIDTH / width
-            scale_h = TARGET_HEIGHT / height
-            scale = min(scale_w, scale_h)  # use full target size
-            
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            
-            # Resize with high-quality resampling
+            scale_w = target_w / width
+            scale_h = target_h / height
+            scale = min(scale_w, scale_h)
+            new_width = max(1, int(width * scale))
+            new_height = max(1, int(height * scale))
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            
-            # Update window size to match image exactly
-            root.geometry(f"{photo.width()}x{photo.height()}")
-            return photo
+            return ImageTk.PhotoImage(img)
 
     def load_image():
-        nonlocal last_mtime, img_obj
+        nonlocal last_mtime, img_obj, orig_img
         if not os.path.exists(CURRENT_IMG):
             return
         try:
             mtime = os.path.getmtime(CURRENT_IMG)
             if last_mtime is None or mtime != last_mtime:
                 last_mtime = mtime
-                # Scale image to fit target size
-                img = scale_image(CURRENT_IMG)
-                img_obj = img
-                lbl.config(image=img_obj)
+                # load original PIL image into memory
+                try:
+                    pil_img = Image.open(CURRENT_IMG).convert('RGBA')
+                except Exception:
+                    pil_img = Image.open(CURRENT_IMG)
+                orig_img = pil_img.copy()
+                pil_img.close()
+                # if the window is still default size, create a nicely scaled photo
+                w = lbl.winfo_width()
+                h = lbl.winfo_height()
+                if w <= 1 or h <= 1:
+                    # use target-based scale for initial sizing
+                    photo = scale_image(CURRENT_IMG)
+                    img_obj = photo
+                    lbl.config(image=img_obj)
+                    # set window size to image size
+                    try:
+                        root.geometry(f"{photo.width()}x{photo.height()}")
+                    except Exception:
+                        pass
+                else:
+                    # rescale to current window
+                    rescale_to_window()
         except Exception:
             # if image loading fails, keep current image
             print("Failed to load image:", sys.exc_info()[1])

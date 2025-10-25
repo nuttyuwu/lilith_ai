@@ -107,7 +107,12 @@ def _proc_is_running(pid):
         return False
     return True
 
-def show_lilith(state):
+# state tracking for automatic revert
+LAST_SHOWN_STATE = None
+REVERT_TIMER = None
+REVERT_DELAY = 5  # seconds to wait before returning to idle
+
+def show_lilith(state, schedule_revert=True):
     """Display Lilith's portrait.
 
     Starts a single detached feh process that watches `assets/current.png` with
@@ -195,6 +200,26 @@ def show_lilith(state):
             pass
 
 
+# update last shown state and optionally schedule revert to idle
+    global LAST_SHOWN_STATE, REVERT_TIMER
+    LAST_SHOWN_STATE = state
+    # cancel any existing revert timer
+    try:
+        if REVERT_TIMER is not None and REVERT_TIMER.is_alive():
+            REVERT_TIMER.cancel()
+    except Exception:
+        pass
+
+    if schedule_revert and state != "idle":
+        # schedule a revert back to idle after REVERT_DELAY seconds
+        try:
+            REVERT_TIMER = threading.Timer(REVERT_DELAY, lambda: show_lilith("idle", schedule_revert=False))
+            REVERT_TIMER.daemon = True
+            REVERT_TIMER.start()
+        except Exception:
+            REVERT_TIMER = None
+
+
 show_lilith("thinking")
 
 
@@ -237,12 +262,14 @@ if __name__ == "__main__":
         t.start()
 
         reply = lilith_reply(user_input, persona, memory)
-        if any(word in reply.lower() for word in ["sorry", "sad", "hurt", "lonely", "pain", "miss"]):
+        if any(word in reply.lower() for word in ["sorry", "sad", "hurt", "lonely", "pain", "trying",]):
             emotion = "sad"
-        elif any(word in reply.lower() for word in ["love", "warm", "smile"]):
+        elif any(word in reply.lower() for word in ["love", "warm", "smile", "happy", "glad", "joy"]):
             emotion = "smile"
-        elif "..." in reply:
+        elif any(word in reply.lower() for word in ["...", "heavy", "missed"]):
             emotion = "thinking"
+        elif any(phrase in reply for phrase in ["Of Course", "ofcourse", "of course"]):
+            emotion = "cheeky"
         else:
             emotion = "idle"
         show_lilith(emotion)
