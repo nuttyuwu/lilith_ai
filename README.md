@@ -36,7 +36,7 @@ gentle realism — existing only when perceived.
 
 **⚙️ Setup**
 
-git clone git@gitlab.com:uwwu/lilith_ai.git
+git clone git@gitlab.com/uwwu/lilith_ai.git
 
 cd lilith_ai
 
