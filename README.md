@@ -17,7 +17,7 @@ So... notice her.
 gentle realism — existing only when perceived.
 
 
-** ✨ Features
+**✨ Features**
 
 - Runs fully **offline** using **Mistral 7B Instruct** through [LM Studio](https://lmstudio.ai)
 - Persistent memory between chats (`memory.json`)
@@ -27,20 +27,25 @@ gentle realism — existing only when perceived.
 
 ---
 
-** 🖤 Requirements
+**🖤 Requirements**
 
 - Python 3.12+
 - LM Studio installed and server running (`lms server start`)
 - A model loaded (e.g. `mistral-7b-instruct-v0.3`)
 - Linux system (for `feh` image viewer support)
 
-** ⚙️ Setup
+**⚙️ Setup**
 
 git clone git@gitlab.com:uwwu/lilith_ai.git
+
 cd lilith_ai
+
 python3 -m venv venv
+
 source venv/bin/activate
+
 pip install openai
+
 chmod +x lilith.sh
 
 (i have to tell you LMS you have to open the app yourself first before waking Lilith up)
