@@ -93,26 +93,115 @@ if __name__ == "__main__":
 
     
 import threading, itertools, sys, time
-def show_lilith(state):
-    img_path = f"assets/{state}.png"
+import os, subprocess, shutil
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FEH_PID_FILE = os.path.join(BASE_DIR, "feh_pid.txt")
+CURRENT_IMG = os.path.join(BASE_DIR, "assets", "current.png")
+VIEWER_SCRIPT = os.path.join(BASE_DIR, "viewer.py")
+
+def _proc_is_running(pid):
     try:
-        subprocess.Popen([
-            "feh",
-            "--title", "Lilith",
-            "--auto-zoom",           # scales image to window
-            "--geometry", "400x600+1200+200",  # window size & position
-            "--zoom", "fit",         # ensures full image is visible
-            img_path
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+def show_lilith(state):
+    """Display Lilith's portrait.
+
+    Starts a single detached feh process that watches `assets/current.png` with
+    --reload enabled. Subsequent calls simply overwrite `current.png` with the
+    desired state image so feh reloads instead of launching a new window.
+    """
+    img_path = os.path.join(BASE_DIR, "assets", f"{state}.png")
+    if not os.path.exists(img_path):
+        print(f"[⚠️ Image not found: {img_path}]")
+        return
+
+    # capture current active window so we can restore focus (if xdotool exists)
+    active_win = None
+    try:
+        xdotool = shutil.which("xdotool")
+        if xdotool:
+            active_win = subprocess.check_output([xdotool, "getactivewindow"], stderr=subprocess.DEVNULL).decode().strip()
     except Exception:
-        pass
+        active_win = None
+
+    # ensure assets/current.png exists and is the requested image
+    try:
+        # copy (atomic-ish) to the watched filename
+        shutil.copyfile(img_path, CURRENT_IMG)
+    except Exception:
+        # fallback to symlink if copy fails
+        try:
+            if os.path.exists(CURRENT_IMG):
+                os.remove(CURRENT_IMG)
+            os.symlink(img_path, CURRENT_IMG)
+        except Exception:
+            # last resort: leave the original image path (may cause a new feh launch)
+            pass
+
+    # if feh is not running yet, start it watching the fixed current.png
+    need_start = True
+    if os.path.exists(FEH_PID_FILE):
+        try:
+            with open(FEH_PID_FILE, "r") as f:
+                pid = int(f.read().strip())
+            if _proc_is_running(pid):
+                need_start = False
+        except Exception:
+            need_start = True
+
+    if need_start:
+        # prefer a bundled Tkinter viewer that tends not to steal focus; if
+        # that isn't available, try feh as a fallback.
+        proc = None
+        try:
+            if os.path.exists(VIEWER_SCRIPT):
+                proc = subprocess.Popen([sys.executable, VIEWER_SCRIPT], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        except Exception:
+            proc = None
+
+        if proc is None:
+            # start detached feh process (watching CURRENT_IMG)
+            proc = subprocess.Popen([
+                "feh",
+                "--title", "Lilith",
+                "--geometry", "400x600+1200+200",
+                "--no-fullscreen",
+                "--borderless",
+                "--scale-down",
+                "--auto-zoom",
+                "--zoom", "20%",
+                "--reload", "0.5",
+                CURRENT_IMG,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        with open(FEH_PID_FILE, "w") as f:
+            f.write(str(proc.pid))
+        # restore focus to previous window (usually the terminal)
+        try:
+            if active_win and xdotool:
+                subprocess.Popen([xdotool, "windowactivate", "--sync", active_win], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    else:
+        # try to restore focus after updating the image so the terminal remains active
+        try:
+            if active_win and xdotool:
+                subprocess.Popen([xdotool, "windowactivate", "--sync", active_win], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
 
 show_lilith("thinking")
 
 
-def spinner():
-    for c in itertools.cycle(['♡','❤','♥','❤']):
+spinning = False
 
+def spinner():
+    for c in itertools.cycle(['♡', '❤', '♥', '❤']):
         if not spinning:
             break
         sys.stdout.write(f'\rLilith is thinking {c}')
@@ -131,6 +220,16 @@ if __name__ == "__main__":
         user_input = input("You: ")
         if user_input.lower() == "exit":
             print("Lilith: ...until next time, then.")
+            # 🌙 close feh window on exit
+            if os.path.exists(FEH_PID_FILE):
+                with open(FEH_PID_FILE) as f:
+                  pid = f.read().strip()
+            try:
+                os.system(f"kill {pid}")
+            except:
+                pass
+            os.remove(FEH_PID_FILE)
+
             break
 
         spinning = True
