@@ -1,0 +1,15 @@
+image: python:3.11
+
+stages:
+  - deploy
+
+pages:
+  stage: deploy
+  script:
+    - pip install -r requirements.txt
+    - python build_static_site.py
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

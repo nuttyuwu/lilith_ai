@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lilith</title>
+    <style>
+        /* Layout: portrait on top, chat below. Make portrait scale for 1080p screens. */
+        :root{
+            --chat-width:80%;
+            --chat-max:1000px;
+            --chat-height:160px;
+        }
+        html,body{height:100%;}
+        body { background:#060606; color:#f8f8f8; font-family:'Nunito',sans-serif;
+               display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+               gap:18px; padding:28px; box-sizing:border-box; margin:0; }
+
+        /* Portrait: allow large 2k image but constrain to viewport height so it never overflows */
+        #portrait {
+            width:auto; max-width:100%;
+            max-height: calc(100vh - var(--chat-height) - 100px); /* reserve room for chat + margins */
+            object-fit:contain; display:block; transition:opacity 0.35s ease;
+            border-radius:6px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+        }
+
+        /* Chat box: semi-transparent, wider and shorter */
+        #chatbox { width:var(--chat-width); max-width:var(--chat-max);
+                   background: rgba(10,6,6,0.55); border-radius:18px;
+                   padding:16px 20px; box-shadow:0 10px 40px rgba(0,0,0,0.6);
+                   backdrop-filter: blur(6px); border:1px solid rgba(200,30,30,0.06);
+                   box-sizing:border-box; }
+
+        /* Dialogue area smaller height (shorter) and semi-transparent panel look */
+        #dialogue { min-height:110px; max-height:220px; overflow:auto; white-space:pre-wrap; font-size:1.15em; line-height:1.45; }
+
+        input { width:100%; padding:12px 14px; border:none; border-radius:12px; margin-top:12px;
+                background: rgba(0,0,0,0.45); color:#fff; font-size:1.05em; outline:none;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+        input::placeholder{ color:rgba(255,255,255,0.45); }
+    </style>
+</head>
+<body>
+    <img id="portrait" src="/static/idle.png" alt="Lilith portrait">
+    <div id="chatbox">
+        <div id="dialogue" style="margin:14px 0;">Lilith is here. Gazing into your eyes~ Type 'exit' to leave.</div>
+        <input id="userInput" type="text" placeholder="You...">
+    </div>
+
+    <!-- Debug panel: show all debug info -->
+    <div style="width:var(--chat-width); max-width:var(--chat-max); color:#ddd; font-size:0.9em; margin-top:6px;">
+        <button id="toggleDebug" style="background:transparent; color:#f4f4f4; border:1px solid rgba(255,255,255,0.06); padding:6px 10px; border-radius:8px; cursor:pointer;">show debug info</button>
+        <div id="debugPanel" style="display:none; margin-top:10px; padding:12px; background:rgba(0,0,0,0.35); border-radius:12px; max-height:240px; overflow:auto;">
+            <div style="margin-bottom:20px">
+                <strong>Debug Info:</strong>
+                {% if debug is defined %}
+                <pre style="color:#888; font-size:0.9em;">
+Working Directory: {{ debug.cwd }}
+Base Directory: {{ debug.base_dir }}
+Persona File: {{ debug.persona_file }}
+Memory File: {{ debug.memory_file }}
+Persona Length: {{ debug.persona_length }}
+Memory Entries: {{ debug.memory_count }}
+                </pre>
+                {% else %}
+                <pre style="color:#888; font-size:0.9em;">No debug info provided by server.</pre>
+                {% endif %}
+            </div>
+
+            <div style="margin-bottom:20px">
+                <strong>Persona:</strong>
+                <pre style="white-space:pre-wrap; color:#f0e9e9; margin-top:5px">{{ persona if persona else 'No persona loaded' }}</pre>
+            </div>
+
+            <div>
+                <strong>Recent Memory (last 20):</strong>
+                {% if memory %}
+                <ul style="color:#e8e8e8; padding-left:18px; margin-top:5px">
+                {% for m in memory %}
+                    <li><em>{{ m.role }}</em>: {{ m.content }}</li>
+                {% endfor %}
+                </ul>
+                {% else %}
+                <p style="color:#888; margin-top:5px">No memory entries found</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/config.js"></script>
+    <script>
+        const API_BASE = (window.API_BASE_URL || "").replace(/\/$/, "");
+        function apiUrl(path) {
+            return API_BASE ? `${API_BASE}${path}` : path;
+        }
+
+        const portrait = document.getElementById('portrait');
+        const dialogue = document.getElementById('dialogue');
+        const input = document.getElementById('userInput');
+
+        function showSpinner() {
+            const hearts = ['♡', '❤', '♥', '❤'];
+            let index = 0;
+            dialogue.textContent = '';
+            return setInterval(() => {
+                dialogue.textContent = `Lilith is thinking ${hearts[index]}`;
+                index = (index + 1) % hearts.length;
+            }, 100);
+        }
+
+        function hideSpinner() {
+            dialogue.textContent = '';
+        }
+
+        function typeText(text, isLilith = true) {
+            dialogue.textContent = isLilith ? 'Lilith: ' : 'You: ';
+            let i = 0;
+            function typing() {
+                if (i < text.length) {
+                    const char = text.charAt(i);
+                    dialogue.textContent += char;
+                    i++;
+                    // Add pauses like in lilith.py
+                    let delay = 40;
+                    if (char === '.' || char === '…') delay = 400;
+                    else if (char === ',' || char === '~') delay = 250;
+                    else delay = 30;
+                    setTimeout(typing, delay);
+                }
+            }
+            typing();
+        }
+
+        function setEmotion(emotion) {
+            portrait.src = `/static/${emotion}.png`;
+        }
+
+        // Check for existence-related keywords
+        function hasExistenceKeywords(text) {
+            const keywords = ['exist', 'existence', 'do you exist', 'are you real', 
+                            'you\'re not real', 'youre not real', 'not real', 
+                            'imaginary', 'fake'];
+            return keywords.some(word => text.toLowerCase().includes(word));
+        }
+
+        // Determine emotion from reply
+        function getEmotionFromReply(reply) {
+            const r_lower = reply.toLowerCase();
+            if (r_lower.includes('sorry') || r_lower.includes('sad') || 
+                r_lower.includes('hurt') || r_lower.includes('lonely') || 
+                r_lower.includes('pain') || r_lower.includes('trying')) {
+                return 'sad';
+            } else if (r_lower.includes('love') || r_lower.includes('warm') || 
+                      r_lower.includes('smile') || r_lower.includes('happy') || 
+                      r_lower.includes('glad') || r_lower.includes('joy')) {
+                return 'smile';
+            } else if (r_lower.includes('...') || r_lower.includes('heavy') || 
+                      r_lower.includes('missed')) {
+                return 'thinking';
+            } else if (r_lower.includes('of course') || r_lower.includes('ofcourse')) {
+                return 'cheeky';
+            }
+            return 'talking';
+        }
+
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && input.value.trim() !== '') {
+                const msg = input.value;
+                input.value = '';
+                
+                // Show user message first
+                typeText(msg, false);
+                
+                // Check for existence questioning and start spinner
+                if (hasExistenceKeywords(msg)) {
+                    setEmotion('dissapointed');
+                } else {
+                    setEmotion('thinking');
+                }
+                
+                const spinnerInterval = showSpinner();
+
+                try {
+                    const res = await fetch(apiUrl('/chat'), {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({message: msg})
+                    });
+
+                    const data = await res.json();
+                    
+                    // Clear spinner and show reply
+                    clearInterval(spinnerInterval);
+                    hideSpinner();
+                    setTimeout(() => {
+                        dialogue.textContent += '\n';
+                        typeText(data.reply);
+
+                        // Use server-provided emotion (matches terminal heuristics)
+                        if (data.emotion) setEmotion(data.emotion);
+
+                        // Return to idle after delay
+                        setTimeout(() => setEmotion('idle'), 5000);
+                    }, 800);
+                } catch (error) {
+                    // Handle any errors
+                    clearInterval(spinnerInterval);
+                    hideSpinner();
+                    dialogue.textContent = 'Something went wrong... Lilith seems distant.';
+                    setEmotion('sad');
+                }
+            }
+        });
+
+        // Debug panel toggle
+        const toggleDebug = document.getElementById('toggleDebug');
+        const debugPanel = document.getElementById('debugPanel');
+        toggleDebug.addEventListener('click', () => {
+            if (debugPanel.style.display === 'none' || debugPanel.style.display === '') {
+                debugPanel.style.display = 'block';
+                toggleDebug.textContent = 'hide persona & memory';
+            } else {
+                debugPanel.style.display = 'none';
+                toggleDebug.textContent = 'show persona & memory';
+            }
+        });
+
+        setInterval(()=>{
+            if(portrait.src.includes('idle')){
+                portrait.src = '/static/blinking.png';
+                setTimeout(()=>portrait.src = '/static/idle.png', 250);
+            }
+        }, 8000);
+    </script>
+</body>
+</html>

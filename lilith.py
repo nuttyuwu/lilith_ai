@@ -282,7 +282,7 @@ if __name__ == "__main__":
     persona = load_persona()
     memory = load_memory()
 
-    print("Lilith is here. Gazing into your eyes~ Type 'exit' to leave.\n")
+    print("Lilith is here. she gazes softly at you~ Type 'exit' to leave.\n")
     show_lilith("idle")
     # start blink loop
     try:
