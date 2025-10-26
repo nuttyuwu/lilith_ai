@@ -111,6 +111,25 @@ def _proc_is_running(pid):
 LAST_SHOWN_STATE = None
 REVERT_TIMER = None
 REVERT_DELAY = 5  # seconds to wait before returning to idle
+# blinking controls
+BLINK_THREAD = None
+BLINK_RUNNING = False
+BLINK_MIN = 2
+BLINK_MAX = 4
+BLINK_DURATION = 0.25  # how long a blink frame shows (seconds)
+
+# keywords that indicate someone is questioning her existence
+EXISTENCE_KEYWORDS = [
+    "exist",
+    "existence",
+    "do you exist",
+    "are you real",
+    "you're not real",
+    "youre not real",
+    "not real",
+    "imaginary",
+    "fake",
+]
 
 def show_lilith(state, schedule_revert=True):
     """Display Lilith's portrait.
@@ -223,6 +242,30 @@ def show_lilith(state, schedule_revert=True):
 show_lilith("thinking")
 
 
+def _blink_loop():
+    """Background loop that triggers blinking when Lilith is idle."""
+    global BLINK_RUNNING
+    import random
+    while BLINK_RUNNING:
+        # sleep a random interval
+        wait = random.uniform(BLINK_MIN, BLINK_MAX)
+        for _ in range(int(wait * 10)):
+            if not BLINK_RUNNING:
+                return
+            time.sleep(0.1)
+        # only blink when idle and no other revert timer is active
+        try:
+            if LAST_SHOWN_STATE == "idle":
+                # show blinking briefly without scheduling another revert
+                show_lilith("blinking", schedule_revert=False)
+                # after BLINK_DURATION, revert to idle
+                timer = threading.Timer(BLINK_DURATION, lambda: show_lilith("idle", schedule_revert=False))
+                timer.daemon = True
+                timer.start()
+        except Exception:
+            pass
+
+
 spinning = False
 
 def spinner():
@@ -241,6 +284,13 @@ if __name__ == "__main__":
 
     print("Lilith is here. Gazing into your eyes~ Type 'exit' to leave.\n")
     show_lilith("idle")
+    # start blink loop
+    try:
+        BLINK_RUNNING = True
+        BLINK_THREAD = threading.Thread(target=_blink_loop, daemon=True)
+        BLINK_THREAD.start()
+    except Exception:
+        pass
     while True:
         user_input = input("You: ")
         if user_input.lower() == "exit":
@@ -255,27 +305,58 @@ if __name__ == "__main__":
                 pass
             os.remove(FEH_PID_FILE)
 
+            # stop blink thread and exit
+            try:
+                BLINK_RUNNING = False
+            except Exception:
+                pass
             break
+        # if the user questions Lilith's existence, show disappointed immediately
+        u_lower = user_input.lower()
+        existence_trigger = any(k in u_lower for k in EXISTENCE_KEYWORDS)
+        if existence_trigger:
+            show_lilith("dissapointed")
 
         spinning = True
         t = threading.Thread(target=spinner)
         t.start()
 
         reply = lilith_reply(user_input, persona, memory)
-        if any(word in reply.lower() for word in ["sorry", "sad", "hurt", "lonely", "pain", "trying",]):
+        r_lower = reply.lower()
+        if any(word in r_lower for word in ["sorry", "sad", "hurt", "lonely", "pain", "trying"]):
             emotion = "sad"
-        elif any(word in reply.lower() for word in ["love", "warm", "smile", "happy", "glad", "joy"]):
+        elif any(word in r_lower for word in ["love", "warm", "smile", "happy", "glad", "joy"]):
             emotion = "smile"
-        elif any(word in reply.lower() for word in ["...", "heavy", "missed"]):
+        elif any(word in r_lower for word in ["...", "heavy", "missed"]):
             emotion = "thinking"
-        elif any(phrase in reply for phrase in ["Of Course", "ofcourse", "of course"]):
+        elif any(phrase in r_lower for phrase in ["of course", "ofcourse"]):
             emotion = "cheeky"
         else:
-            emotion = "idle"
+            # default: use talking expression for any other content, then revert to idle
+            emotion = "talking"
+
+        # show_lilith will schedule a revert to 'idle' after REVERT_DELAY seconds
         show_lilith(emotion)
         
 
         spinning = False
         t.join()
 
-        print(f"Lilith: {reply}\n")
+        def type_out(text):
+            sys.stdout.write("Lilith: ")
+            sys.stdout.flush()
+            for char in text:
+                sys.stdout.write(char)
+                sys.stdout.flush()
+                if char in [".", "…"]:
+                    time.sleep(0.4)
+                elif char in [",", "~"]:
+                    time.sleep(0.25)
+                else:
+                    time.sleep(0.03)
+            # Add newline after Lilith's reply
+            sys.stdout.write("\n\n")
+            sys.stdout.flush()
+            time.sleep(0.8)
+
+        type_out(reply)
