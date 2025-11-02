@@ -71,7 +71,16 @@ lilith
 and she will gaze at you just like the game
 
 --
+## Running on Windows
+Windows
 
+Double-click lilith.bat
+
+Make sure LM Studio is installed in:
+C:\Users\<name>\AppData\Local\Programs\LM Studio\LM Studio.exe
+
+Lilith will wake and gaze at you~
+--
 ## Recent changes (visual viewer and focus handling)
 
 - The portrait system now uses a single watched file at `assets/current.png` so the image viewer (either the bundled `viewer.py` or `feh`) is started only once. Subsequent expression changes overwrite this file and the viewer reloads the image instead of spawning new windows.
