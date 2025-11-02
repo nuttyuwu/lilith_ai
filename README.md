@@ -52,7 +52,7 @@ pip3 install --user Pillow
 
 **⚙️ Setup**
 
-git clone git@gitlab.com/uwwu/lilith_ai.git
+git clone github.com/nuttyuwu/lilith_ai
 
 cd lilith_ai
 
