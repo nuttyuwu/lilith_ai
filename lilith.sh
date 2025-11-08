@@ -1,7 +1,11 @@
 #!/bin/bash
 # Lilith one-command launcher 🖤 (CLI version)
 
-BASE_DIR="$HOME/lilith_ai"
+if [ -d "$HOME/Lilith_ai" ]; then
+  BASE_DIR="$HOME/Lilith_ai"
+else
+  BASE_DIR="$HOME/lilith_ai"
+fi
 SERVER_URL="http://localhost:1234/v1/models"
 LMS_PATH="$HOME/.lmstudio/bin/lms" 
 

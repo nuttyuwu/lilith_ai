@@ -6,8 +6,9 @@ import lilith_display
 import lilith_ai
 
 config = configparser.ConfigParser()
-config.read('config.ini')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "config.ini")
+config.read(CONFIG_PATH)
 DEFAULT_USER_NAME = ""
 
 Lilith_display = lilith_display.LilithDisplay(BASE_DIR, config)
