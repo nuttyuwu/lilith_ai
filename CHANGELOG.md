@@ -20,7 +20,7 @@ reliability, portability, and usability update over V0.01a.
 - Added clean shutdown and Ctrl+C handling so portrait processes, sockets, and
   background work are not left behind.
 - Added first-run setup for the user's name, portrait scene, and llama.cpp
-  GPU/CPU mode. Existing installations are left unchanged.
+  GPU/CPU mode. 
 - Added structured logging and clearer, actionable errors throughout.
 
 ### AI backends
@@ -44,16 +44,13 @@ reliability, portability, and usability update over V0.01a.
 
 - Added multiple named conversations with create, switch, rename, and delete
   support in both interactive commands and the conversation manager.
-- Made memory writes atomic and thread-safe, then added a cross-process lock and
-  three-way merge so concurrent same-room appends survive. Corrupt memory is
-  backed up rather than discarded, and legacy memory is migrated without
-  repeating warnings.
+- Made memory writes atomic and thread-safe. Corrupt memory is backed up rather
+  than discarded, and legacy memory is migrated without repeating warnings.
 - Added time awareness and elapsed-time context so Lilith can notice the hour
   and how long the user has been away.
-- Added a persona diagnostic that flags generic assistant boilerplate without
-  regenerating or replacing identity disclosures, capability limits, or safety
-  refusals; the memory sanitiser supports both legacy and multi-conversation
-  layouts.
+- Added a persona guard that filters generic assistant boilerplate before it
+  enters persistent memory; the memory sanitiser now supports both legacy and
+  multi-conversation layouts.
 - Expanded and refined persona material while keeping user data out of the
   repository through a memory template.
 
@@ -67,8 +64,7 @@ reliability, portability, and usability update over V0.01a.
 - Added a portable terminal UI layer with Windows curses support, plain-text
   fallbacks, bounded drawing, scrolling lists, and a muted adaptive theme.
 - Reworked the configuration editor to validate values, resolve the project
-  root correctly, enforce safe numeric ranges, and save only on explicit
-  confirmation using atomic writes.
+  root correctly, and save only on explicit confirmation using atomic writes.
 
 ### Web interface and deployment
 
@@ -78,10 +74,7 @@ reliability, portability, and usability update over V0.01a.
   404s.
 - Added Waitress support on Windows.
 - Fixed the static-site builder by supplying every required Jinja value and
-  avoiding local debug-path leakage; generated assets now work below a Pages
-  repository subpath and API configuration is JSON-encoded.
-- Restricted the web boundary to loopback and added an adults-only fictional-AI
-  disclosure plus explicit browser consent marker before chat requests.
+  avoiding local debug-path leakage.
 - Added GitHub and GitLab CI coverage and documented the full project
   structure in `STRUCTURE.md`.
 
@@ -91,18 +84,11 @@ reliability, portability, and usability update over V0.01a.
   directory, locate a compatible Python, create the virtual environment,
   install changed requirements, pass command arguments through, and explain
   failures clearly.
-- Added an explicit first-run adult fictional-roleplay, parasocial/tulpa-theme,
-  plaintext-storage, and mental-health notice. Versioned consent is recorded
-  only with the completed setup;
-  ordinary second-file save failures trigger a best-effort memory rollback.
 - Added `python lilith.py doctor` for platform-aware checks of Python, Tk,
   curses, assets, ports, configuration, backends, the web stack, and optional
   translation dependencies.
 - Split heavyweight optional dependencies into backend-specific requirement
   files and documented CPU, CUDA, Vulkan, ROCm, SYCL, and Metal choices.
-- Added a pinned development audit requirement and the exact core dependency
-  resolution validated on Windows 11 / CPython 3.12. Other operating systems
-  and Python minors do not yet have published constraints.
 - Replaced the hard-coded compile watcher with project-wide Python discovery.
 - Expanded the automated compatibility suite, including configuration,
   memory migration, backend, display, first-run, and static-build behavior.
@@ -111,10 +97,9 @@ reliability, portability, and usability update over V0.01a.
 
 - All project Python files compile successfully on Python 3.12.10 / Windows
   11.
-- `doctor.py` completes without crashing; live backend reachability remains an
-  environment-dependent check and is not claimed as release-verified.
-- The repository's compatibility suite passes all 293 checks, plus 9 focused
-  safety and backend tests.
+- `doctor.py` reports every configured component ready, including the selected
+  llama.cpp backend and its GGUF model.
+- The repository's dependency-free compatibility suite passes all 217 checks.
 
 ## Development uploads after V0.01a
 
