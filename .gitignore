@@ -1,9 +1,52 @@
+# Python
 __pycache__/
-*.pyc
-.DS_Store
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Lilith's personal state -- never commit someone else's memories
 memory.json
-assets/current.png
+memory.json.tmp
+memory.json.lock
+memory.*.bak-*.json
+memory.*.corrupt-*.json
+memory.json.bak
+
+# Local configuration (config.example.ini is the tracked template)
+config.ini
+
+# Logs
 *.log
-.venv/*
+*.log.[0-9]
+
+# Models (multi-gigabyte)
 models/
 llama.cpp/
+
+# Generated portrait / build output
+assets/current.png
+static/current.png
+public/
+
+# Superseded prototype kept for reference only. It hardcodes a personal name
+# into the persona and lives in the folder Flask serves publicly, so it must
+# never be published.
+static/backup.txt
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+audit

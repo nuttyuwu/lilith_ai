@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "user_name": "",
+    "user_name_set": false
+  },
+  "conversations": {
+    "default": []
+  },
+  "current_conversation": "default"
+}

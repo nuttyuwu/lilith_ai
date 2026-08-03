@@ -43,19 +43,56 @@
             transition: background 0.2s ease, color 0.2s ease;
         }
         .nickname-btn:hover{ background:rgba(200,30,30,0.25); color:#fff; }
+        button:disabled, input:disabled { cursor:not-allowed; opacity:0.5; }
+        [hidden] { display:none !important; }
+        .safety-notice, .consent-gate {
+            width:var(--chat-width); max-width:var(--chat-max); box-sizing:border-box;
+            padding:12px 16px; border-radius:12px; line-height:1.45;
+        }
+        .safety-notice {
+            background:rgba(80,20,30,0.32); border:1px solid rgba(255,170,180,0.28);
+            color:#f5dfe3; font-size:0.92em;
+        }
+        .consent-gate {
+            background:#161010; border:1px solid rgba(255,255,255,0.18);
+            box-shadow:0 10px 35px rgba(0,0,0,0.65);
+        }
+        .consent-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+        .consent-actions button {
+            padding:9px 14px; border-radius:9px; border:1px solid rgba(255,255,255,0.18);
+            background:#2d1720; color:#fff; cursor:pointer;
+        }
     </style>
 </head>
 <body>
-    <img id="portrait" src="/static/idle.png" alt="Lilith portrait">
+    <aside id="safetyNotice" class="safety-notice" aria-label="Safety and privacy notice">
+        <strong>Adults 18+ · fictional AI roleplay.</strong>
+        Lilith is not a person, mental-health care, or a substitute for professional support.
+        The roleplay may explore intense parasocial or tulpa themes; accept them only as fiction.
+        Nicknames and conversations are stored locally as unencrypted plain text and are sent
+        to whichever model backend you configure.
+    </aside>
+
+    <section id="consentGate" class="consent-gate" role="dialog" aria-labelledby="consentTitle">
+        <strong id="consentTitle">Consent required before chatting</strong>
+        <div>Continue only if you are at least 18 and opt in to the fictional-roleplay,
+        intense-theme, privacy, and mental-health notice above.</div>
+        <div class="consent-actions">
+            <button id="acceptConsent" type="button">I am 18+ and I consent</button>
+            <button id="declineConsent" type="button">I do not consent</button>
+        </div>
+    </section>
+
+    <img id="portrait" src="static/idle.png" alt="Lilith portrait">
     <div id="chatbox">
         <div id="dialogue" style="margin:14px 0;">Lilith is here. Gazing into your eyes~ Type 'exit' to leave.</div>
-        <input id="userInput" type="text" placeholder="You...">
-        <button id="setNameBtn" class="nickname-btn">change nickname</button>
+        <input id="userInput" type="text" placeholder="Accept the safety notice to chat" disabled>
+        <button id="setNameBtn" class="nickname-btn" disabled>change nickname</button>
     </div>
 
     <!-- Debug panel: show all debug info -->
     <div style="width:var(--chat-width); max-width:var(--chat-max); color:#ddd; font-size:0.9em; margin-top:6px;">
-        <button id="toggleDebug" style="background:transparent; color:#f4f4f4; border:1px solid rgba(255,255,255,0.06); padding:6px 10px; border-radius:8px; cursor:pointer;">show debug info</button>
+        <button id="toggleDebug" disabled style="background:transparent; color:#f4f4f4; border:1px solid rgba(255,255,255,0.06); padding:6px 10px; border-radius:8px; cursor:pointer;">show debug info</button>
         <div id="debugPanel" style="display:none; margin-top:10px; padding:12px; background:rgba(0,0,0,0.35); border-radius:12px; max-height:240px; overflow:auto;">
             <div style="margin-bottom:20px">
                 <strong>Debug Info:</strong>
@@ -94,7 +131,7 @@ Memory Entries: {{ debug.memory_count }}
         </div>
     </div>
 
-    <script src="/static/config.js"></script>
+    <script src="static/config.js"></script>
     <script>
         const API_BASE = (window.API_BASE_URL || "").replace(/\/$/, "");
         function apiUrl(path) {
@@ -104,13 +141,57 @@ Memory Entries: {{ debug.memory_count }}
         const initialUserName = {{ user_name|tojson }};
         let currentName = initialUserName || "";
         let userNameSet = {{ user_name_set|tojson }};
+        const SAFETY_CONSENT_VERSION = {{ safety_consent_version|tojson }};
+        const SAFETY_STORAGE_KEY = 'lilith.safetyConsentVersion';
+        let safetyConsentAccepted = false;
 
         const portrait = document.getElementById('portrait');
         const dialogue = document.getElementById('dialogue');
         const input = document.getElementById('userInput');
         const setNameBtn = document.getElementById('setNameBtn');
+        const consentGate = document.getElementById('consentGate');
+        const acceptConsent = document.getElementById('acceptConsent');
+        const declineConsent = document.getElementById('declineConsent');
+        const toggleDebug = document.getElementById('toggleDebug');
+        const debugPanel = document.getElementById('debugPanel');
+
+        function storedSafetyConsent() {
+            try {
+                return window.localStorage.getItem(SAFETY_STORAGE_KEY);
+            } catch (error) {
+                console.warn('Safety consent could not be read from local storage.', error);
+                return null;
+            }
+        }
+
+        function setSafetyConsent(accepted, persist = false) {
+            safetyConsentAccepted = accepted;
+            consentGate.hidden = accepted;
+            input.disabled = !accepted;
+            setNameBtn.disabled = !accepted;
+            toggleDebug.disabled = !accepted;
+            input.placeholder = accepted ? 'You...' : 'Accept the safety notice to chat';
+            if (persist) {
+                try {
+                    if (accepted) {
+                        window.localStorage.setItem(SAFETY_STORAGE_KEY, SAFETY_CONSENT_VERSION);
+                    } else {
+                        window.localStorage.removeItem(SAFETY_STORAGE_KEY);
+                    }
+                } catch (error) {
+                    console.warn('Safety consent could not be saved to local storage.', error);
+                }
+            }
+        }
+
+        function requestNicknameAfterConsent() {
+            if (safetyConsentAccepted && (!userNameSet || !currentName)) {
+                setTimeout(() => promptForNickname(true), 500);
+            }
+        }
 
         async function promptForNickname(force = false) {
+            if (!safetyConsentAccepted) return null;
             while (true) {
                 const promptText = force
                     ? "she leans closer. what should she call you?"
@@ -184,39 +265,11 @@ Memory Entries: {{ debug.memory_count }}
         }
 
         function setEmotion(emotion) {
-            portrait.src = `/static/${emotion}.png`;
-        }
-
-        // Check for existence-related keywords
-        function hasExistenceKeywords(text) {
-            const keywords = ['exist', 'existence', 'do you exist', 'are you real', 
-                            'you\'re not real', 'youre not real', 'not real', 
-                            'imaginary', 'fake'];
-            return keywords.some(word => text.toLowerCase().includes(word));
-        }
-
-        // Determine emotion from reply
-        function getEmotionFromReply(reply) {
-            const r_lower = reply.toLowerCase();
-            if (r_lower.includes('sorry') || r_lower.includes('sad') || 
-                r_lower.includes('hurt') || r_lower.includes('lonely') || 
-                r_lower.includes('pain') || r_lower.includes('trying')) {
-                return 'sad';
-            } else if (r_lower.includes('love') || r_lower.includes('warm') || 
-                      r_lower.includes('smile') || r_lower.includes('happy') || 
-                      r_lower.includes('glad') || r_lower.includes('joy')) {
-                return 'smile';
-            } else if (r_lower.includes('...') || r_lower.includes('heavy') || 
-                      r_lower.includes('missed')) {
-                return 'thinking';
-            } else if (r_lower.includes('of course') || r_lower.includes('ofcourse')) {
-                return 'cheeky';
-            }
-            return 'talking';
+            portrait.src = `static/${emotion}.png`;
         }
 
         input.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter' && input.value.trim() !== '') {
+            if (e.key === 'Enter' && safetyConsentAccepted && input.value.trim() !== '') {
                 if (!userNameSet || !currentName) {
                     await promptForNickname(true);
                     if (!userNameSet || !currentName) {
@@ -226,28 +279,36 @@ Memory Entries: {{ debug.memory_count }}
 
                 const msg = input.value;
                 input.value = '';
-                
+
                 // Show user message first
                 typeText(msg, false);
-                
-                // Check for existence questioning and start spinner
-                if (hasExistenceKeywords(msg)) {
-                    setEmotion('dissapointed');
-                } else {
-                    setEmotion('thinking');
-                }
-                
+
+                // Every question gets a neutral waiting state. In particular,
+                // asking whether Lilith is real or AI must never show guilt or
+                // disappointment while the response is generated.
+                setEmotion('thinking');
+
                 const spinnerInterval = showSpinner();
 
                 try {
                     const res = await fetch(apiUrl('/chat'), {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Lilith-Safety-Consent': SAFETY_CONSENT_VERSION
+                        },
                         body: JSON.stringify({message: msg})
                     });
 
-                    const data = await res.json();
-                    
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        if (res.status === 428) {
+                            setSafetyConsent(false, true);
+                            throw new Error('Safety consent is required before chatting.');
+                        }
+                        throw new Error('The chat request was not accepted.');
+                    }
+
                     // Clear spinner and show reply
                     clearInterval(spinnerInterval);
                     hideSpinner();
@@ -265,26 +326,38 @@ Memory Entries: {{ debug.memory_count }}
                     // Handle any errors
                     clearInterval(spinnerInterval);
                     hideSpinner();
-                    dialogue.textContent = 'Something went wrong... Lilith seems distant.';
+                    dialogue.textContent = error.message === 'Safety consent is required before chatting.'
+                        ? error.message
+                        : 'Something went wrong... Lilith seems distant.';
                     setEmotion('sad');
                 }
             }
         });
 
         setNameBtn.addEventListener('click', () => {
-            promptForNickname(true);
+            if (safetyConsentAccepted) promptForNickname(true);
+        });
+
+        acceptConsent.addEventListener('click', () => {
+            setSafetyConsent(true, true);
+            dialogue.textContent = 'Safety consent accepted. You can chat when ready.';
+            input.focus();
+            requestNicknameAfterConsent();
+        });
+
+        declineConsent.addEventListener('click', () => {
+            setSafetyConsent(false, true);
+            dialogue.textContent = 'Consent was not given. Chat remains disabled.';
         });
 
         window.addEventListener('load', () => {
-            if (!userNameSet || !currentName) {
-                setTimeout(() => promptForNickname(true), 500);
-            }
+            setSafetyConsent(storedSafetyConsent() === SAFETY_CONSENT_VERSION);
+            requestNicknameAfterConsent();
         });
 
         // Debug panel toggle
-        const toggleDebug = document.getElementById('toggleDebug');
-        const debugPanel = document.getElementById('debugPanel');
         toggleDebug.addEventListener('click', () => {
+            if (!safetyConsentAccepted) return;
             if (debugPanel.style.display === 'none' || debugPanel.style.display === '') {
                 debugPanel.style.display = 'block';
                 toggleDebug.textContent = 'hide persona & memory';
@@ -296,8 +369,8 @@ Memory Entries: {{ debug.memory_count }}
 
         setInterval(()=>{
             if(portrait.src.includes('idle')){
-                portrait.src = '/static/blinking.png';
-                setTimeout(()=>portrait.src = '/static/idle.png', 250);
+                portrait.src = 'static/blinking.png';
+                setTimeout(()=>portrait.src = 'static/idle.png', 250);
             }
         }, 8000);
     </script>

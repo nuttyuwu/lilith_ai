@@ -1,0 +1,23 @@
+# Line endings.
+#
+# This repo is developed on Windows and tested on Linux, so line endings are
+# pinned here rather than left to each contributor's core.autocrlf setting.
+# Without this, a Windows checkout commits CRLF into lilith.sh and Linux then
+# fails with "bad interpreter: /bin/bash^M" -- which looks like a missing
+# shell rather than a whitespace problem.
+
+# Normalise every text file to LF inside the repository and on checkout.
+* text=auto eol=lf
+
+# Windows batch is the exception: cmd.exe parses labels and multi-line blocks
+# by line, and an LF-only .bat can silently mis-execute.
+*.bat text eol=crlf
+
+# Belt and braces -- these must stay LF even if the rules above are relaxed.
+*.sh text eol=lf
+
+# Binaries: never EOL-converted, never diffed as text.
+*.png binary
+*.ico binary
+*.gguf binary
+*.safetensors binary

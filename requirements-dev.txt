@@ -1,0 +1,2 @@
+# Release/development checks. Runtime users do not need these packages.
+pip-audit==2.10.1

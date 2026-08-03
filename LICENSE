@@ -17,7 +17,15 @@ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
 
-MIT License applies only to the code and implementation.
-The character "Lilith" and assets from *The Noexistence of You and Me*
-belong to their original creators. This project is an unofficial fan work
-created for educational and personal use.
+## Scope notice
+
+The MIT License above applies only to original software implementation in this
+repository. It does not grant rights to the character Lilith, game-derived or
+third-party creative text, model weights or training material, or bundled PNG
+artwork.
+
+The character and *The NOexistenceN of you AND me* belong to their respective
+rights holders. This is an unofficial fan project. No redistribution permission
+is currently documented for the bundled artwork; see `ASSET_LICENSES.md`.
+Separate model attribution and terms are recorded in `CREDITS.md` and the model
+section of `README.md`.

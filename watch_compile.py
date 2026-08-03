@@ -1,64 +1,74 @@
 #!/usr/bin/env python3
 """
-Watch Python files in the current directory and automatically compile them when they change.
-Run this in a separate terminal while editing to get instant compile feedback.
+Recompiles Python files on change, for instant syntax feedback while editing.
+
+Fixes over the previous version: it watched a hardcoded two-file list, one of
+which ('viewer.py') is at modules/viewer.py, so that entry never matched
+anything. It now walks the project tree, skips virtualenvs and caches, and
+reports a clean pass/fail summary.
 """
-import os
+
+from __future__ import annotations
+
+import py_compile
 import sys
 import time
-import py_compile
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-# files to watch (add more if needed)
-WATCH_FILES = [
-    'lilith.py',
-    'viewer.py'
-]
+from modules import compat
 
-def get_mtime(file):
-    """Get modification time of a file or 0 if it doesn't exist."""
+SKIP_DIRS = {"__pycache__", ".git", "venv", ".venv", "env", "models",
+             "public", "node_modules", "llama.cpp"}
+
+
+def python_files() -> list[Path]:
+    return [
+        path for path in compat.BASE_DIR.rglob("*.py")
+        if not any(part in SKIP_DIRS for part in path.parts)
+    ]
+
+
+def compile_one(path: Path) -> bool:
+    stamp = datetime.now().strftime("%H:%M:%S")
+    relative = path.relative_to(compat.BASE_DIR)
     try:
-        return os.path.getmtime(file)
-    except OSError:
-        return 0
-
-def compile_file(file):
-    """Compile a Python file and print the result."""
-    try:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Compiling {file}...")
-        py_compile.compile(file, doraise=True)
-        print(f"✓ {file} compiled successfully")
+        py_compile.compile(str(path), doraise=True)
+        print(f"[{stamp}] {compat.sym('check')} {relative}")
         return True
-    except Exception as e:
-        print(f"✗ {file} has errors:\n{str(e)}")
+    except py_compile.PyCompileError as exc:
+        print(f"[{stamp}] {compat.sym('cross')} {relative}\n{exc}")
         return False
 
-def main():
-    # get base directory
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # track last modified times
-    last_mtimes = {f: get_mtime(os.path.join(base_dir, f)) for f in WATCH_FILES}
-    
-    print(f"Watching Python files for changes (Ctrl+C to stop):")
-    for f in WATCH_FILES:
-        print(f"  {f}")
-    
+
+def main() -> int:
+    compat.enable_utf8_console()
+
+    if "--once" in sys.argv:
+        results = [compile_one(path) for path in python_files()]
+        failed = results.count(False)
+        print(f"\n{len(results) - failed}/{len(results)} files compiled cleanly.")
+        return 1 if failed else 0
+
+    mtimes = {path: path.stat().st_mtime for path in python_files()}
+    print(f"Watching {len(mtimes)} Python files under {compat.BASE_DIR}")
+    print("Ctrl+C to stop.\n")
+
     try:
         while True:
-            for file in WATCH_FILES:
-                filepath = os.path.join(base_dir, file)
-                mtime = get_mtime(filepath)
-                
-                if mtime > last_mtimes[file]:
-                    compile_file(filepath)
-                    last_mtimes[file] = mtime
-            
-            time.sleep(1)  # check every second
-    
+            for path in python_files():
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime > mtimes.get(path, 0):
+                    compile_one(path)
+                    mtimes[path] = mtime
+            time.sleep(1)
     except KeyboardInterrupt:
-        print("\nStopped watching files.")
+        print("\nStopped watching.")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

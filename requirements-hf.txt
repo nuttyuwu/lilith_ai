@@ -1,0 +1,12 @@
+# Offline inference with HuggingFace transformers.  Set [server] server_ai = hf
+#
+# Install a CPU-only torch first if you have no NVIDIA GPU:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.2.0
+transformers>=4.40.0,<6.0
+huggingface_hub>=0.24.0
+safetensors>=0.4.3
+sentencepiece>=0.2.0
+sacremoses>=0.1.0
+accelerate>=0.30.0

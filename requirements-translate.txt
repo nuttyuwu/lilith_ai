@@ -1,0 +1,9 @@
+# Translate Lilith's replies with NLLB-200.  Set [translator] enable = true
+#
+# Install a CPU-only torch first if you have no NVIDIA GPU:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.2.0
+transformers>=4.40.0,<6.0
+sentencepiece>=0.2.0
+sacremoses>=0.1.0

@@ -1,10 +1,47 @@
-Flask>=3.0
-flask-cors>=4.0
-openai>=1.0
-gunicorn>=21.2
-pillow
-ollama
-transformers
-sentencepiece
-sacremoses
-llama-cpp-python
+# Lilith -- core dependencies (Linux and Windows 11)
+#
+#   python -m venv venv
+#   Linux:              source venv/bin/activate
+#   Windows PowerShell: .\venv\Scripts\Activate.ps1
+#   Windows CMD:        venv\Scripts\activate.bat
+#   python -m pip install -r requirements.txt
+#
+# A tested exact Windows/Python 3.12 resolution is published separately:
+#   py -3.12 -m pip install -r requirements.txt -c constraints/windows-py312.txt
+#
+# This file covers the portrait window, both terminal UIs, the web UI, and the
+# two lightweight AI backends (Ollama and LM Studio). The heavy backends are
+# separate files on purpose -- see the bottom of this file.
+
+# Portrait window.
+# On Debian/Ubuntu you also need the system Tk bindings, which pip cannot provide:
+#   sudo apt install python3-tk python3-pil.imagetk
+pillow>=10.0.0
+
+# curses is not in the Python standard library on Windows.
+# Without this the 'edit' and 'conv_edit' screens fall back to numbered menus.
+windows-curses>=2.3.2; sys_platform == "win32"
+
+# AI backends that talk over HTTP (no compiler, no CUDA, no model download).
+ollama>=0.3.0
+openai>=1.30.0
+
+# Web interface (web_lilith.py).
+Flask>=3.0.0
+flask-cors>=4.0.0
+# waitress is the production server that works on both platforms.
+waitress>=3.0.0
+# gunicorn is POSIX-only -- it cannot even be imported on Windows.
+gunicorn>=21.2.0; sys_platform != "win32"
+
+# ---------------------------------------------------------------------------
+# Optional extras, install only what you need:
+#
+#   requirements-llama.txt      offline GGUF inference (llama.cpp)
+#   requirements-hf.txt         offline transformers inference (needs torch)
+#   requirements-translate.txt  translate Lilith's replies (needs torch)
+#
+# torch is a very large download. If you have no NVIDIA GPU, install the
+# CPU-only build first to avoid pulling ~3 GB of CUDA libraries:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# ---------------------------------------------------------------------------

@@ -1,173 +1,32 @@
+"""
+Optional NLLB-200 translator, applied to Lilith's replies.
+
+Fixes over the previous version:
+  * ``_SIMPLE_LANG_MAP`` was defined *below* the class that used it at call
+    time -- it happened to work, but only by accident of import ordering.
+    It is now defined first.
+  * A stray copy of ``translate`` sat at module level taking ``self`` as its
+    first argument: 60 lines of dead code that shadowed nothing and confused
+    everyone reading the file. Removed, along with ~130 lines of commented-out
+    earlier drafts.
+  * ``tokenizer.src_lang`` is now set. Without it NLLB encodes the input with
+    the wrong language tag and quality drops sharply.
+  * Accepts an already-parsed config object, so it no longer re-reads
+    config.ini from the current working directory.
+  * Model loading failures raise a message naming the missing package rather
+    than a transformers traceback.
+"""
+
+from __future__ import annotations
+
+import logging
 import re
-import configparser
-from pathlib import Path
-from typing import Dict, Tuple
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import sys
 
+from modules import compat
 
-class Translator:
+logger = logging.getLogger(__name__)
 
-    _PROTECT_PATTERN = re.compile(
-        r'(\*[^*]+\*|\([^)]*\)|\[[^\]]*\]|\{[^}]*\}|«[^»]*»|“[^”]*”|"[^"]*"|\'[^\']*\'|`[^`]*`)',
-        re.MULTILINE,
-    )
-
-    def __init__(self, config_path: str = "config.ini", model_name: str = "facebook/nllb-200-distilled-600M"):
-        cfg = configparser.ConfigParser()
-        read_files = cfg.read(config_path)
-        if not read_files:
-            raise FileNotFoundError(f"Config file not found at: {config_path}")
-
-        if "translator" not in cfg:
-            raise KeyError("Config file must contain [translator] section with source_lang and target_lang")
-
-        src = cfg["translator"].get("source_lang")
-        tgt = cfg["translator"].get("target_lang")
-        if not src or not tgt:
-            raise KeyError("translator.source_lang and translator.target_lang must be set in config.ini")
-
-        self.source_lang = self._normalize_lang(src)
-        self.target_lang = self._normalize_lang(tgt)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-
-        try:
-            self.forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(self.target_lang)
-        except Exception:
-            self.forced_bos_token_id = None
-
-    @staticmethod
-    def _normalize_lang(code: str) -> str:
-        code = code.strip()
-        if "_" in code:
-            return code 
-        code_lower = code.lower()
-        if code_lower in _SIMPLE_LANG_MAP:
-            return _SIMPLE_LANG_MAP[code_lower]
-        raise ValueError(f"Can't get lang select from: {', '.join(sorted(_SIMPLE_LANG_MAP.keys()))}")
-
-    def translate(self, text: str, max_length: int = 512, **generate_kwargs) -> str:
-        if not text:
-            return text
-
-        gen_kwargs = dict(max_length=max_length, num_beams=4)
-        if self.forced_bos_token_id is not None:
-            gen_kwargs["forced_bos_token_id"] = self.forced_bos_token_id
-        gen_kwargs.update(generate_kwargs)
-
-        parts = self._PROTECT_PATTERN.split(text)
-        translated_parts = []
-
-        for part in parts:
-            if not part:
-                translated_parts.append(part)
-                continue
-
-            if self._PROTECT_PATTERN.fullmatch(part):
-                opener = part[0]
-                closer = part[-1]
-                inner = part[1:-1]
-
-                if not inner.strip():
-                    translated_parts.append(part)
-                    continue
-
-                m = re.match(r'^(\s*)(.*?)(\s*)$', inner, re.DOTALL)
-                if m:
-                    lead, core, trail = m.groups()
-                else:
-                    lead, core, trail = "", inner, ""
-
-                if core == "":
-                    translated_parts.append(part)
-                    continue
-
-                inputs = self.tokenizer(core, return_tensors="pt", truncation=True, max_length=max_length)
-                outputs = self.model.generate(**inputs, **gen_kwargs)
-                decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-
-                translated_parts.append(f"{opener}{lead}{decoded}{trail}{closer}")
-                continue
-
-            m = re.match(r'^(\s*)(.*?)(\s*)$', part, re.DOTALL)
-            if m:
-                lead, core, trail = m.groups()
-            else:
-                lead, core, trail = "", part, ""
-
-            if core == "":
-                translated_parts.append(part)
-                continue
-
-            inputs = self.tokenizer(core, return_tensors="pt", truncation=True, max_length=max_length)
-            outputs = self.model.generate(**inputs, **gen_kwargs)
-            decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-
-            translated_parts.append(lead + decoded + trail)
-
-        return "".join(translated_parts)
-
-def translate(self, text: str, max_length: int = 512, **generate_kwargs) -> str:
-    if not text:
-        return text
-
-    gen_kwargs = dict(forced_bos_token_id=self.forced_bos_token_id, max_length=max_length, num_beams=4)
-    gen_kwargs.update(generate_kwargs)
-
-    parts = self._PROTECT_PATTERN.split(text)
-    translated_parts = []
-
-    for part in parts:
-        if not part:
-            translated_parts.append(part)
-            continue
-
-        if self._PROTECT_PATTERN.fullmatch(part):
-            opener = part[0]
-            closer = part[-1]
-            inner = part[1:-1]
-
-            if not inner.strip():
-                translated_parts.append(part)
-                continue
-
-            m = re.match(r'^(\s*)(.*?)(\s*)$', inner, re.DOTALL)
-            if m:
-                lead, core, trail = m.groups()
-            else:
-                lead, core, trail = "", inner, ""
-
-            if core == "":
-                translated_parts.append(part)
-                continue
-
-            inputs = self.tokenizer(core, return_tensors="pt", truncation=True, max_length=max_length)
-            outputs = self.model.generate(**inputs, **gen_kwargs)
-            decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-
-            translated_parts.append(f"{opener}{lead}{decoded}{trail}{closer}")
-            continue
-
-        m = re.match(r'^(\s*)(.*?)(\s*)$', part, re.DOTALL)
-        if m:
-            lead, core, trail = m.groups()
-        else:
-            lead, core, trail = "", part, ""
-
-        if core == "":
-            translated_parts.append(part)
-            continue
-
-        inputs = self.tokenizer(core, return_tensors="pt", truncation=True, max_length=max_length)
-        outputs = self.model.generate(**inputs, **gen_kwargs)
-        decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-
-        translated_parts.append(lead + decoded + trail)
-
-    return "".join(translated_parts)
-
+# Short code -> NLLB-200 language tag.
 _SIMPLE_LANG_MAP = {
     "en": "eng_Latn",
     "ru": "rus_Cyrl",
@@ -180,159 +39,138 @@ _SIMPLE_LANG_MAP = {
     "zh": "zho_Hans",
     "ar": "ara_Arab",
     "hi": "hin_Deva",
+    "ja": "jpn_Jpan",
+    "ko": "kor_Hang",
+    "mn": "khk_Cyrl",
+    "tr": "tur_Latn",
+    "pl": "pol_Latn",
 }
 
 
-# class Translator:
-#     """
-#     Класс переводит текст с source_lang -> target_lang с помощью модели NLLB-200.
-#     Сохраняет нетронутыми фрагменты, взятые в: *, (), [], {}, "", '', ``, «», кавычки-ёлочки.
-#     Конфигурация читается из config.ini: секция [translator], ключи source_lang и target_lang.
-#     """
+class Translator:
+    """Translates text while leaving bracketed/quoted spans untouched.
 
-#     _PROTECT_PATTERN = re.compile(
-#         r'(\*[^*]+\*|\([^)]*\)|\[[^\]]*\]|\{[^}]*\}|«[^»]*»|“[^”]*”|"[^"]*"|\'[^\']*\'|`[^`]*`)',
-#         re.MULTILINE,
-#     )
+    Lilith's replies use *asterisks* for actions and quotes for speech; those
+    delimiters must survive translation intact.
+    """
 
-#     def __init__(self, config_path: str = "config.ini", model_name: str = "facebook/nllb-200-distilled-600M"):
-#         cfg = configparser.ConfigParser()
-#         read_files = cfg.read(config_path)
-#         if not read_files:
-#             raise FileNotFoundError(f"Config file not found at: {config_path}")
+    _PROTECT_PATTERN = re.compile(
+        r'(\*[^*]+\*|\([^)]*\)|\[[^\]]*\]|\{[^}]*\}|\u00ab[^\u00bb]*\u00bb'
+        r'|\u201c[^\u201d]*\u201d|"[^"]*"|\'[^\']*\'|`[^`]*`)',
+        re.MULTILINE,
+    )
 
-#         if "translator" not in cfg:
-#             raise KeyError("Config file must contain [translator] section with source_lang and target_lang")
+    def __init__(self, config=None, config_path: str | None = None,
+                 model_name: str | None = None):
+        config = config if config is not None else compat.load_config(config_path)
+        section = config["translator"]
 
-#         src = cfg["translator"].get("source_lang")
-#         tgt = cfg["translator"].get("target_lang")
-#         if not src or not tgt:
-#             raise KeyError("translator.source_lang and translator.target_lang must be set in config.ini")
+        source = section.get("source_lang", "en")
+        target = section.get("target_lang", "ru")
+        self.source_lang = self._normalise_lang(source)
+        self.target_lang = self._normalise_lang(target)
+        self.model_name = model_name or section.get(
+            "model_name", "facebook/nllb-200-distilled-600M"
+        )
 
-#         self.source_lang = self._normalize_lang(src)
-#         self.target_lang = self._normalize_lang(tgt)
+        try:
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError(
+                "The translator needs transformers, torch and sentencepiece:\n"
+                "    pip install -r requirements-translate.txt"
+            ) from exc
 
-#         # Загрузка модели и токенизатора
-#         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-#         # у NLLB-tokenizer есть map lang_code_to_id; устанавливаем поведение
-#         # Если источник/цель заданы пользователем, убедимся что такой ключ есть
-#         # if not hasattr(self.tokenizer, "lang_code_to_id"):
-#         #     raise RuntimeError("Tokenizer does not support lang_code_to_id mapping required for NLLB models")
+        logger.info("Loading translator %s (%s -> %s)",
+                    self.model_name, self.source_lang, self.target_lang)
 
-#         # if self.target_lang not in self.tokenizer.lang_code_to_id:
-#         #     raise ValueError(f"Target language code '{self.target_lang}' not recognized by tokenizer")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+        self.model.eval()
 
-#         # # установить исходный язык (некоторые версии токенизаторов используют это поле)
-#         # try:
-#         #     self.tokenizer.src_lang = self.source_lang
-#         # except Exception:
-#         #     pass
+        # Tell NLLB what it is reading, not just what to write.
+        try:
+            self.tokenizer.src_lang = self.source_lang
+        except Exception:
+            logger.debug("Tokenizer does not accept src_lang; continuing")
 
-#         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        token_id = self.tokenizer.convert_tokens_to_ids(self.target_lang)
+        unknown = getattr(self.tokenizer, "unk_token_id", None)
+        self.forced_bos_token_id = (
+            token_id if token_id is not None and token_id != unknown else None
+        )
+        if self.forced_bos_token_id is None:
+            logger.warning("Tokenizer did not recognise target tag %r", self.target_lang)
 
-#         # forced_bos_token_id принудительно ставит токен начала для целевого языка (NLLB специфично)
-#         self.forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(self.target_lang)
+    @staticmethod
+    def _normalise_lang(code: str) -> str:
+        code = (code or "").strip()
+        if "_" in code:
+            return code  # already a full NLLB tag such as eng_Latn
+        if code.lower() in _SIMPLE_LANG_MAP:
+            return _SIMPLE_LANG_MAP[code.lower()]
+        raise ValueError(
+            f"Unknown language code {code!r}. Use a full NLLB tag "
+            f"(e.g. eng_Latn) or one of: {', '.join(sorted(_SIMPLE_LANG_MAP))}"
+        )
 
-#     @staticmethod
-#     def _normalize_lang(code: str) -> str:
-#         code = code.strip()
-#         if "_" in code:
-#             return code  # считаем, что это уже NLLB-код вида eng_Latn
-#         code_lower = code.lower()
-#         if code_lower in _SIMPLE_LANG_MAP:
-#             return _SIMPLE_LANG_MAP[code_lower]
-#         raise ValueError(f"Не удалось сопоставить язык '{code}'. Укажите полный NLLB-код (например 'eng_Latn') или один из: {', '.join(sorted(_SIMPLE_LANG_MAP.keys()))}")
+    def _translate_chunk(self, text: str, max_length: int, gen_kwargs: dict) -> str:
+        inputs = self.tokenizer(
+            text, return_tensors="pt", truncation=True, max_length=max_length
+        )
+        outputs = self.model.generate(**inputs, **gen_kwargs)
+        return self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
 
-#     def _protect_spans(self, text: str) -> Tuple[str, Dict[str, str]]:
-#         """
-#         Заменяет все фрагменты, подходящие под шаблон, на плейсхолдеры.
-#         Возвращает (masked_text, mapping placeholder->original).
-#         """
-#         mapping = {}
-#         parts = []
-#         last = 0
-#         idx = 0
-#         for m in self._PROTECT_PATTERN.finditer(text):
-#             start, end = m.span()
-#             # добавляем промежуток между предыдущим матчем и текущим
-#             parts.append(text[last:start])
-#             placeholder = f"<<<PROT_{idx}>>>"
-#             parts.append(placeholder)
-#             mapping[placeholder] = m.group(0)
-#             last = end
-#             idx += 1
-#         parts.append(text[last:])
-#         masked = "".join(parts)
-#         return masked, mapping
+    def translate(self, text: str, max_length: int = 512, **generate_kwargs) -> str:
+        if not text or not text.strip():
+            return text
 
-#     def _restore_spans(self, text: str, mapping: Dict[str, str]) -> str:
-#         # Простая замена плейсхолдеров на оригинальные фрагменты
-#         for ph, orig in mapping.items():
-#             text = text.replace(ph, orig)
-#         return text
+        gen_kwargs = {"max_length": max_length, "num_beams": 4}
+        if self.forced_bos_token_id is not None:
+            gen_kwargs["forced_bos_token_id"] = self.forced_bos_token_id
+        gen_kwargs.update(generate_kwargs)
 
-#     def translate(self, text: str, max_length: int = 512, **generate_kwargs) -> str:
-#         """
-#         Переводит текст, сохраняя защищённые фрагменты.
-#         Дополнительные параметры генерации можно передавать в generate_kwargs.
-#         Реализация теперь разбивает исходный текст на сегменты (защищённые и незащищённые),
-#         переводит только незащищённые сегменты по отдельности и затем собирает результат,
-#         чтобы защита фрагментов оставалась точной и не зависела от поведения токенизатора.
-#         """
-#         if not text:
-#             return text
+        out: list[str] = []
+        for part in self._PROTECT_PATTERN.split(text):
+            if not part:
+                continue
 
-#         # Параметры генерации для модели
-#         gen_kwargs = dict(forced_bos_token_id=self.forced_bos_token_id, max_length=max_length, num_beams=4)
-#         gen_kwargs.update(generate_kwargs)
+            protected = bool(self._PROTECT_PATTERN.fullmatch(part))
+            opener = closer = ""
+            body = part
+            if protected:
+                opener, closer, body = part[0], part[-1], part[1:-1]
+                if not body.strip():
+                    out.append(part)
+                    continue
 
-#         parts = self._PROTECT_PATTERN.split(text)
-#         translated_parts = []
+            match = re.match(r"^(\s*)(.*?)(\s*)$", body, re.DOTALL)
+            lead, core, trail = match.groups() if match else ("", body, "")
+            if not core:
+                out.append(part)
+                continue
 
-#         for part in parts:
-#             if not part:
-#                 # пустая строка — просто добавляем
-#                 translated_parts.append(part)
-#                 continue
+            try:
+                translated = self._translate_chunk(core, max_length, gen_kwargs)
+            except Exception as exc:
+                logger.warning("Chunk translation failed (%s); keeping original", exc)
+                translated = core
 
-#             # Если часть полностью соответствует защищённому шаблону — оставляем её как есть
-#             if self._PROTECT_PATTERN.fullmatch(part):
-#                 translated_parts.append(part)
-#                 continue
+            out.append(f"{opener}{lead}{translated}{trail}{closer}")
 
-#             # Иначе переводим только "содержимую" часть, сохраняя ведущие/замыкающие пробелы
-#             m = re.match(r'^(\s*)(.*?)(\s*)$', part, re.DOTALL)
-#             if m:
-#                 lead, core, trail = m.groups()
-#             else:
-#                 lead, core, trail = "", part, ""
-
-#             if core == "":
-#                 translated_parts.append(part)
-#                 continue
-
-#             inputs = self.tokenizer(core, return_tensors="pt", truncation=True, max_length=max_length)
-#             outputs = self.model.generate(**inputs, **gen_kwargs)
-#             decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-
-#             translated_parts.append(lead + decoded + trail)
-
-#         return "".join(translated_parts)
+        return "".join(out)
 
 
 if __name__ == "__main__":
-    try:
-        cfg_path = Path("config.ini")
-        if not cfg_path.exists():
-            print("config.ini not found")
-            sys.exit(2)
+    import sys
 
-        t = Translator(config_path=str(cfg_path))
-        sample = 'This is a test sentence with *protected phrase*, a (bracketed part), and "quoted text".'
-        print("ORIGINAL:")
-        print(sample)
-        print("\nTRANSLATED:")
-        print(t.translate(sample))
-    except Exception as e:
-        print(f"Error during test run: {e}")
+    try:
+        translator = Translator()
+    except Exception as exc:
+        print(f"Could not start the translator: {exc}")
         sys.exit(1)
+
+    sample = ('This is a test sentence with *a protected phrase*, '
+              'a (bracketed part), and "quoted text".')
+    print("ORIGINAL:\n" + sample)
+    print("\nTRANSLATED:\n" + translator.translate(sample))

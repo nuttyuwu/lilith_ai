@@ -1,15 +1,78 @@
-image: python:3.11
+# Tests the static page build without publishing it. Public Pages deployment is
+# intentionally disabled: artwork rights are unresolved and the bundled API is
+# strictly loopback-only, so an interactive public page has no supported safe
+# backend.
+#
+# Previously this failed on every run: build_static_site.py crashed with
+# "Object of type Undefined is not JSON serializable" because index.html
+# calls |tojson on template variables the build never passed.
+#
+# The static-build job only needs Flask to render one Jinja template; the
+# compatibility job installs the core set so web checks do not silently skip.
+
+image: python:3.12
+
+default:
+  interruptible: true
+  timeout: 25m
 
 stages:
-  - deploy
+  - test
 
-pages:
-  stage: deploy
-  script:
-    - pip install -r requirements.txt
-    - python build_static_site.py
-  artifacts:
+.pip_cache: &pip_cache
+  cache:
+    key:
+      files:
+        - requirements.txt
+        - requirements-dev.txt
     paths:
-      - public
-  only:
-    - main
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+compatibility:
+  stage: test
+  <<: *pip_cache
+  script:
+    - python -m pip install -r requirements.txt
+    - python -m pip check
+    - python -m compileall -q lilith.py doctor.py web_lilith.py build_static_site.py sanitize_memory.py scan_secrets.py watch_compile.py modules tests
+    - bash -n lilith.sh
+    - python tests/test_compat.py
+    - python -m unittest tests.test_safety tests.test_backends
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+dependency-audit:
+  stage: test
+  <<: *pip_cache
+  script:
+    - python -m pip install -r requirements-dev.txt
+    - python -m pip_audit -r requirements.txt --strict --progress-spinner off
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+secret-scan:
+  stage: test
+  script:
+    - python scan_secrets.py
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+static-build:
+  stage: test
+  <<: *pip_cache
+  script:
+    - python -m pip install Flask
+    - python build_static_site.py
+    - python -c "from pathlib import Path; html=Path('public/index.html').read_text(encoding='utf-8'); files={p.name for p in Path('public/static').iterdir()}; assert '/static/' not in html, 'root-absolute static URL found'; assert 'static/idle.png' in html; assert 'backup.txt' not in files and 'current.png' not in files"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG

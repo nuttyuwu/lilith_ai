@@ -1,0 +1,30 @@
+# Offline GGUF inference via llama.cpp.  Set [server] server_ai = llama
+#
+# Windows note: this package builds C++ from source unless a matching wheel is
+# found, which needs the "Desktop development with C++" workload from the
+# Visual Studio Build Tools. To skip the compiler entirely, use the prebuilt
+# wheel index:
+#
+#   pip install llama-cpp-python --extra-index-url \
+#       https://abetlen.github.io/llama-cpp-python/whl/cpu
+#
+# GPU offload is not NVIDIA-only. Lilith passes n_gpu_layers straight through,
+# so what matters is which build you install:
+#
+#   NVIDIA   swap "cpu" above for your CUDA version, e.g. cu124
+#   AMD      Vulkan (any OS), or ROCm on Linux
+#   Intel    Vulkan (any OS), or SYCL
+#   Apple    Metal, already on in the macOS build
+#
+# Vulkan covers AMD, Intel and NVIDIA from a single build:
+#
+#   CMAKE_ARGS="-DGGML_VULKAN=on" pip install llama-cpp-python \
+#       --no-binary llama-cpp-python
+#
+# On a non-NVIDIA card it is usually less work to skip this backend and use
+# Ollama or LM Studio instead; both detect AMD and Intel GPUs themselves.
+#
+# Linux note: needs a C compiler (build-essential) unless a wheel matches.
+
+llama-cpp-python>=0.3.0
+huggingface_hub>=0.24.0
