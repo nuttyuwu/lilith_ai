@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 
 import modules._iface as _iface
 import modules.lilith_memory as lilith_memory
-from modules import compat, persona_guard, safety
+from modules import companionship, compat, persona_guard, safety
 
 logger = logging.getLogger(__name__)
 
@@ -316,11 +316,33 @@ class LilithAI:
 
     # -- prompt assembly --------------------------------------------------
 
-    def _system_block(self) -> str:
+    def _system_block(self, extra: str = "") -> str:
         block = f"{self.persona}\n\nThe person you are speaking with is called {self.user_name}."
         if self.time_awareness:
             block += f"\n\n{self._time_context()}"
-        return block
+        return block + extra
+
+    def _companionship_nudge(self, prompt: str) -> str:
+        """One-turn guidance when someone withdraws or leans on her too hard.
+
+        Rate-limited on purpose. Saying this every single time somebody wants
+        an evening to themselves is nagging, and a companion that nags gets
+        closed -- which is the exact outcome the reminder exists to prevent.
+        """
+        kind = companionship.detect(prompt)
+        if kind is None:
+            return ""
+
+        meta = self.memory.setdefault("meta", {})
+        if not companionship.due(meta.get("last_companionship_note")):
+            logger.debug("%s signal seen; reminder suppressed (too recent)", kind)
+            return ""
+
+        meta["last_companionship_note"] = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        logger.info("Companionship reminder issued (%s)", kind)
+        return companionship.guidance_for(kind)
 
     def _trim_history(self, history: list) -> list:
         if self.max_history_messages <= 0:
@@ -396,9 +418,9 @@ class LilithAI:
             logger.info("Dropped %s old turn(s) to fit the context window", dropped)
         return kept
 
-    def _build_payload(self, history: list, prompt: str) -> list:
+    def _build_payload(self, history: list, prompt: str, extra: str = "") -> list:
         """Assemble the full message list sent to the backend."""
-        system_text = self._system_block()
+        system_text = self._system_block(extra)
         return (
             [{"role": "system", "content": system_text}]
             + self._fit_history(history, system_text, prompt)
@@ -451,7 +473,9 @@ class LilithAI:
 
         with self._lock:
             conv_name, history = self._get_current_conv_list()
-            payload = self._build_payload(history, prompt)
+            payload = self._build_payload(
+                history, prompt, self._companionship_nudge(prompt)
+            )
             raw = self._ask(payload)
 
             # Detect generic service voice for local diagnostics, but never

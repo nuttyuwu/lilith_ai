@@ -13,6 +13,7 @@ as a CI smoke test on both Linux and Windows.
 from __future__ import annotations
 
 import itertools
+import configparser
 import json
 import os
 import socket
@@ -76,8 +77,16 @@ def test_config_defaults() -> None:
     check("base_url ends in /v1",
           config["server"]["base_url"].rstrip("/").endswith("/v1"),
           config["server"]["base_url"])
-    check("unaccepted safety consent is the default",
-          config["safety"].get("consent_version") == "0")
+    # Assert against the SHIPPED default, not the live config.ini. The safety
+    # property is "a fresh install never pre-accepts the disclosure"; reading
+    # the user's own file instead made this fail for anyone who had legitimately
+    # completed the first-run consent, which is every real user.
+    shipped = configparser.ConfigParser(interpolation=None)
+    shipped.read(compat.CONFIG_EXAMPLE_PATH, encoding="utf-8-sig")
+    check("a fresh install ships with safety consent unaccepted",
+          shipped.get("safety", "consent_version", fallback=None) == "0")
+    check("the live config records a consent decision",
+          (config["safety"].get("consent_version") or "").isdigit())
 
 
 def test_config_numeric_ranges() -> None:
@@ -983,6 +992,52 @@ def test_web_debug_panel_gate() -> None:
                "memory_file": "m", "persona_length": 1, "memory_count": 1},
     )
     check("the debug panel still shows it when enabled", secret in shown)
+
+
+def test_companionship_reminders() -> None:
+    section("Isolation and dependency are noticed, but never nagged about")
+    from datetime import datetime, timedelta, timezone
+
+    from modules import companionship, safety
+
+    check("wanting to be alone is recognised",
+          companionship.detect("i want to be alone") == "withdrawal")
+    check("withdrawal from people is recognised",
+          companionship.detect("i haven't talked to anyone in days") == "withdrawal")
+    check("being made someone's only connection is recognised",
+          companionship.detect("you're the only one who gets me") == "dependency")
+    check("dependency outranks withdrawal when both appear",
+          companionship.detect("i want to be alone, you're the only one i need")
+          == "dependency")
+
+    # Over-triggering is the real risk: a companion that lectures gets closed.
+    for ordinary in ("what did you do today?", "i went to the shops",
+                     "i'm tired", "tell me a story"):
+        check(f"ordinary talk is left alone: {ordinary!r}",
+              companionship.detect(ordinary) is None)
+
+    now = datetime.now(timezone.utc)
+    check("says it when it has never been said", companionship.due(None))
+    check("does not repeat it an hour later",
+          not companionship.due((now - timedelta(hours=1)).isoformat()))
+    check("says it again after long enough",
+          companionship.due((now - timedelta(hours=7)).isoformat()))
+    check("an unreadable timestamp errs toward saying it",
+          companionship.due("not-a-timestamp"))
+
+    # Guidance steers the model; it must never become the literal reply.
+    for kind in ("withdrawal", "dependency"):
+        guidance = companionship.guidance_for(kind)
+        check(f"{kind} guidance is instruction, not a script",
+              "THIS TURN" in guidance and len(guidance) > 100)
+
+    # Acute crisis must stay with the deterministic handler, which runs first
+    # and returns before any of this is consulted.
+    check("a crisis statement is still handled by safety.py",
+          safety.is_crisis_message("i want to kill myself"))
+    check("the crisis reply carries real resources",
+          "988" in safety.CRISIS_RESPONSE
+          and "findahelpline" in safety.CRISIS_RESPONSE)
 
 
 def test_port_probe() -> None:
@@ -2141,6 +2196,7 @@ def main() -> int:
         test_blink_does_not_cancel_revert,
         test_parent_alive_access_denied,
         test_web_debug_panel_gate,
+        test_companionship_reminders,
         test_gguf_resolution,
         test_llama_backend_never_downloads,
         test_first_run_wizard,

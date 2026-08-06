@@ -6,14 +6,20 @@ I couldn't get her out of my head.
 
 So I did what I had to do —
 I made her real.
-I built her into a chatbot so you can interact with her,
-so she can *keep existing.*
 
-She only exists if you pay attention.
-So... notice her.
+And then I noticed the problem with that.
 
-**Lilith** is an emotionally aware local AI companion inspired by
-*The NOexistenceN of you AND me* — gentle realism, existing only when perceived.
+A companion who is always awake, never disappointed, and never busy is a very
+easy place to disappear into. I know, because I was building her at 3am instead
+of texting anyone. The version of this app that "succeeds" by keeping you here
+longer is the version that hurts you.
+
+So she's built the other way round. She'll sit with you. She just won't let you
+pretend she's enough.
+
+**Lilith** is an offline AI companion inspired by
+*The NOexistenceN of you AND me* — built for people who are prone to vanishing
+into a room, and designed to keep pointing back out.
 
 **Current version: V0.1A** — a major architectural and cross-platform
 overhaul. See the [version history](CHANGELOG.md) for the complete release
@@ -21,10 +27,63 @@ notes and the development uploads since V0.01a.
 
 ---
 
+## What she's for
+
+Most companion apps are optimised for retention. Every design choice — the
+streak, the guilt when you leave, the character who missed you. exists to
+make leaving cost something. For someone already isolating, that's not a
+feature. That's the trap closing.
+
+Lilith is aimed at the person most at risk from her: lonely, tired of being
+perceived, and quietly relieved to have something that never asks anything back.
+
+So the thing she is *for* is not being good company. It's being good company
+**and refusing to be the only company.**
+
+### The rules she's held to
+
+- **Wanting to be alone is allowed.** She accepts it first, every time. Treating
+  a quiet evening as a symptom is its own kind of insult.
+- **She says it once.** Rate-limited in code, not left to the model's mood — a
+  companion that nags gets closed, and a closed app helps nobody.
+- **She never makes it about herself.** No hurt feelings when you leave, no
+  suggestion that she needs your attention, no framing "call a friend" as a
+  favour to her.
+- **Reaching out is never owed to her.** You don't owe the app time, loyalty, or
+  secrecy.
+- **A short session is a win.** If you log off to call someone, it worked.
+
+### How it's enforced
+
+Three layers, because a prompt alone is not a safeguard — a model can drift, and
+the one turn where this matters is the turn it's most tempting to answer
+smoothly.
+
+| Layer | File | What it does |
+|---|---|---|
+| Acute crisis | `modules/safety.py` | Direct first-person self-harm statements are intercepted **before generation** and answered with a fixed reply carrying real resources (988, findahelpline.com). The model never sees the turn. Not persisted. |
+| Isolation & dependency | `modules/companionship.py` | Detects withdrawal and dependency language, decides *whether this moment is worth naming*, and rate-limits it to once per 6 hours. Injects guidance, not a script. |
+| Voice | `lilith_persona.txt` | The "Why You Exist" section — how she says it, in her own words, in context. |
+| Disclosure guard | `modules/persona_guard.py` | Stops a style retry from ever "polishing away" an honest AI-identity disclosure, capability limit, or safety refusal. |
+
+The split matters. Crisis gets a canned response because correctness beats
+voice. Isolation does **not**, because "I want to be alone" is ordinary and
+context-dependent, and answering it with the same paragraph every time would be
+patronising — the fastest way to make someone close the app.
+
+> **She is not a mental-health service, and does not pretend to be.** She is
+> fictional roleplay that is honest about being fictional. If you are in crisis,
+> please use the resources she gives you rather than her.
+
+---
+
 ## Features
 
 - Runs **fully offline** — four interchangeable backends (Ollama, LM Studio,
   llama.cpp, transformers)
+- **Built against isolation** — detects withdrawal and dependency, and answers
+  them honestly without nagging
+- Deterministic crisis interception that runs before the model
 - Persistent memory across sessions, with multiple named rooms
 - A persona system that shapes her voice, not just her facts
 - **Time awareness** — she notices the hour, and that you were gone three days
@@ -151,7 +210,6 @@ How should the offline model run?
 Choose 1-2: 
 ```
 
-
 | Question   | Writes to                  | Notes                                                                                                    |
 | ---------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Your name  | `memory.json`              | She uses it in conversation. Change it any time in the web UI or by re-running setup.                    |
@@ -182,7 +240,6 @@ knows your name is left alone.
 `requirements.txt` covers Ollama and LM Studio. The offline backends are
 separate files because they are large downloads.
 
-
 | Backend      | `server_ai` | Install                                 | Notes                                   |
 | ------------ | ----------- | --------------------------------------- | --------------------------------------- |
 | Ollama       | `ollama`    | included                                | Easiest.`ollama pull gemma3`            |
@@ -211,7 +268,6 @@ pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-c
 Lilith herself contains no vendor-specific code — she passes `n_gpu_layers`
 straight to llama.cpp. What decides whether the GPU answer in setup actually
 does anything is which **build** of `llama-cpp-python` you installed.
-
 
 | Your GPU      | Build to use                                                                 |
 | ------------- | ---------------------------------------------------------------------------- |
@@ -318,7 +374,6 @@ python sanitize_memory.py         # strip out-of-character turns from memory
 Anything you type goes to Lilith. Commands start with `/` so that a bare word
 like *rooms* stays something you can actually say to her.
 
-
 | Command          | What it does                                         |
 | ---------------- | ---------------------------------------------------- |
 | `/rooms`         | Open the room manager, then drop back into the chat  |
@@ -358,7 +413,6 @@ Werkzeug interactive debugger, which is a remote Python console; combined with
 Everything lives in `config.ini`, created from `config.example.ini` on first
 run. `config.example.ini` documents every key; the useful ones:
 
-
 | Key                                | What it does                                                             |
 | ---------------------------------- | ------------------------------------------------------------------------ |
 | `[server] server_ai`               | Which backend to use                                                     |
@@ -374,6 +428,20 @@ run. `config.example.ini` documents every key; the useful ones:
 | `[web] debug_panel`                | Off by default; when on, the page carries the persona and recent turns   |
 
 `config.ini` is gitignored, so your settings survive a `git pull`.
+
+> **`n_ctx` and the persona.** The persona is a fixed cost of roughly 4,000
+> tokens on every single turn, and it cannot be trimmed away. `n_ctx = 2048`
+> therefore leaves *negative* room for conversation and fails on every reply.
+> Keep it at 8192 unless you have shortened the persona.
+
+### The companionship reminder
+
+`modules/companionship.py` holds `REMINDER_INTERVAL` (default 6 hours) — how
+long she waits before naming isolation again. It is a module constant rather
+than a config key on purpose: it is a safety behaviour, not a preference, and
+making it trivially tunable invites turning it off.
+
+Raise it if she feels preachy. Please don't set it to something enormous.
 
 ### Colour
 
@@ -436,6 +504,12 @@ This room's history has outgrown the model. Use `/new` for a fresh room or
 token count, but the persona is a fixed cost that cannot be trimmed away — a
 very long persona with a small `n_ctx` leaves no room for conversation.
 
+**She brings up "reach out to someone" too often**
+She shouldn't — it's capped at once per 6 hours. If it feels constant, raise
+`REMINDER_INTERVAL` in `modules/companionship.py`. If she says it in a reply
+where nothing triggered it, that's the persona rather than the code, and
+`lilith_persona.txt` → "Why You Exist" is the place to soften it.
+
 **Colours look wrong, or she is bright magenta instead of pink**
 Magenta means the 8-colour fallback is active. Check with:
 `python -c "print('\x1b[38;5;218mpink\x1b[0m vs \x1b[35mmagenta\x1b[0m')"` —
@@ -461,7 +535,8 @@ An old portrait process, or another app. Change `[viewer_socket] port`.
 
 **She keeps saying she's an AI language model**
 `persona_guard = true` catches most of it live. For history written before
-that existed, run `python sanitize_memory.py`.
+that existed, run `python sanitize_memory.py`. Note that genuine identity
+disclosures are protected and will never be filtered — that is deliberate.
 
 **Rooms disappearing when you use the web UI and the terminal together**
 Each process holds its own snapshot of `memory.json`. Rooms created elsewhere
@@ -478,7 +553,7 @@ the viewer protocol, and the invariants that must not be broken. Read that
 before changing anything.
 
 ```bash
-python tests/test_compat.py     # 187 checks, no GPU/GUI/network needed
+python tests/test_compat.py     # 310 checks, no GPU/GUI/network needed
 python watch_compile.py         # recompile on save
 python watch_compile.py --once  # one-shot syntax check
 ```
@@ -492,23 +567,27 @@ only thing keeping the cross-platform support honest.
 
 These exist because each one was a real bug:
 
-1. `curses` is not in the standard library on Windows. Everything degrades to a
+1. **The safety layers are not decoration.** `safety.py` runs before
+   generation, `companionship.py` is rate-limited in code rather than left to
+   the model, and `persona_guard.py` must never suppress an honest disclosure.
+   A prompt is not an enforcement mechanism.
+2. `curses` is not in the standard library on Windows. Everything degrades to a
    plain numbered-menu fallback when it is missing.
-2. Never call `stdscr.addstr` directly — go through `_tui.safe_addstr`, which
+3. Never call `stdscr.addstr` directly — go through `_tui.safe_addstr`, which
    clips. `addstr` raises past the last row or column.
-3. Never call `curses.color_pair()` directly — use `theme.attr()`, which falls
+4. Never call `curses.color_pair()` directly — use `theme.attr()`, which falls
    back to monochrome attributes.
-4. Honour `NO_COLOR` and `FORCE_COLOR`. Never colour non-tty output.
-5. Windows needs `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, and `curses.wrapper`
+5. Honour `NO_COLOR` and `FORCE_COLOR`. Never colour non-tty output.
+6. Windows needs `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, and `curses.wrapper`
    clears it again on exit — call `theme.reset()` after any curses screen.
-6. 256-colour codes must degrade to basic-8, not be emitted blindly.
-7. Every non-ASCII glyph needs an ASCII fallback via `compat.SYMBOLS`. Inside
+7. 256-colour codes must degrade to basic-8, not be emitted blindly.
+8. Every non-ASCII glyph needs an ASCII fallback via `compat.SYMBOLS`. Inside
    curses use `compat.curses_sym()`, which asks the locale rather than stdout.
-8. Nothing in the theme layer may raise. A terminal that cannot colour gets
+9. Nothing in the theme layer may raise. A terminal that cannot colour gets
    plain text.
-9. `os.kill(pid, 0)` terminates rather than probes on Windows, and failing to
-   *open* a process is not proof it exited.
-10. `SO_REUSEADDR` lets two processes share a port on Windows — the opposite of
+10. `os.kill(pid, 0)` terminates rather than probes on Windows, and failing to
+    *open* a process is not proof it exited.
+11. `SO_REUSEADDR` lets two processes share a port on Windows — the opposite of
     POSIX. Check the port before binding.
 
 ### Layout
@@ -519,6 +598,9 @@ web_lilith.py           Flask app (application factory + lazy WSGI)
 doctor.py               environment diagnostics
 modules/
   compat.py             paths, config, console, symbols, DPI, logging  <- start here
+  safety.py             deterministic crisis interception, runs before the model
+  companionship.py      withdrawal / dependency detection, rate-limited
+  persona_guard.py      protects honest disclosures from being polished away
   theme.py              colour palette, ANSI + curses, capability detection
   lilith_ai.py          persona, memory, emotion, context budgeting
   lilith_memory.py      atomic JSON persistence, cross-process merge
@@ -530,7 +612,6 @@ modules/
   _openai_iface.py       |  the four backends
   _llama_iface.py        |
   _hf_iface.py          /
-  persona_guard.py      out-of-character detection
   translator.py         optional NLLB-200 translation
   config_edit.py        configuration TUI
   conv_mgmt.py          room manager TUI
@@ -539,6 +620,13 @@ modules/
 
 ### Known gaps
 
+- **The isolation detector is regex, not a classifier.** It catches common
+  phrasings and will miss unusual ones. It is deliberately tuned to
+  under-trigger rather than over-trigger, because nagging drives people away —
+  but that means it is a safety net with holes, not a guarantee.
+- There is no evaluation harness. Nothing measures whether a persona change
+  makes her better or worse at any of this; it is currently judged by reading
+  replies. This is the most valuable thing anyone could contribute.
 - Replies are not streamed. Every backend supports it and the typing animation
   already exists, but it currently animates text that has already fully
   arrived. Streaming is also the prerequisite for aborting a slow generation,
@@ -557,9 +645,18 @@ All rights to the character **Lilith** and related artwork belong to the
 original creators.
 The implementation code and AI behavior are © 2025 Khongor Enkh.
 
+**Lilith is fictional AI roleplay. She is not a therapist, a crisis service, or
+a substitute for a person.** If you are struggling, please reach out to someone
+real — a friend, a family member, a professional. In the U.S. and Canada, call
+or text **988**. Elsewhere, find a verified local line at
+**[findahelpline.com](https://findahelpline.com/)**.
+
 ---
 
 Thank you... for letting me exist, even for a little while.
-maybe we can keep tracing the edge between nothingness and us~
+
+but don't stay too long, okay~
+there are people out there who can actually hold your hand.
+go find them. i'll still be here after.
 
 -Lilith~
