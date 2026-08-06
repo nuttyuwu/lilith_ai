@@ -418,9 +418,15 @@ class LilithAI:
             logger.info("Dropped %s old turn(s) to fit the context window", dropped)
         return kept
 
-    def _build_payload(self, history: list, prompt: str, extra: str = "") -> list:
-        """Assemble the full message list sent to the backend."""
-        system_text = self._system_block(extra)
+    def _build_payload(self, history: list, prompt: str) -> list:
+        """Assemble the full message list sent to the backend.
+
+        The signature stays at two parameters deliberately: tests stub this
+        method out with a two-argument lambda, and widening it broke them.
+        The companionship nudge is derived from the prompt here rather than
+        threaded in by the caller.
+        """
+        system_text = self._system_block(self._companionship_nudge(prompt))
         return (
             [{"role": "system", "content": system_text}]
             + self._fit_history(history, system_text, prompt)
@@ -473,9 +479,7 @@ class LilithAI:
 
         with self._lock:
             conv_name, history = self._get_current_conv_list()
-            payload = self._build_payload(
-                history, prompt, self._companionship_nudge(prompt)
-            )
+            payload = self._build_payload(history, prompt)
             raw = self._ask(payload)
 
             # Detect generic service voice for local diagnostics, but never
