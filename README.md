@@ -660,3 +660,43 @@ there are people out there who can actually hold your hand.
 go find them. i'll still be here after.
 
 -Lilith~
+
+### Reliable storage and hosting
+
+Set `[ai_config] memory = memory.sqlite3` to use transactional SQLite storage.
+The first open imports the adjacent `memory.json` without changing it. Mira
+imports `memory.mira.json` into her independent `memory.mira.sqlite3` database.
+Unknown metadata and every conversation are retained. Versioned schema checks
+refuse an unsupported database; invalid legacy JSON stops migration rather than
+silently replacing history. Concurrent saves use the existing conflict-aware
+merge inside an SQLite transaction.
+
+Each database has a consistent daily backup next to it, named
+`memory.backup-YYYY-MM-DD.sqlite3` (or `memory.mira.backup-...`). Seven daily
+snapshots are retained. Backups are made on first open and before the first save
+of a new day; they are recovery snapshots, not a copy after every message.
+The cleanup tool supports both JSON and SQLite and exports a JSON backup before
+editing. All memory databases, backups, and tunnel credentials remain private
+and are excluded from the static site build and Git.
+
+`python web_lilith.py --production` requires Waitress. Public hosting also
+requires Waitress and rejects debug mode; it never falls back to Flask's
+development server. Local development can still use `--debug`.
+
+For this Windows installation, `.tunnel/start-host.ps1` starts `hosting.py`.
+The supervisor starts the production app and Cloudflare connector, restarts
+either if it exits, and delays repeated restarts from 2 seconds up to 60 seconds.
+Windows runs the actual server interpreter with the venv packages so a failed
+launcher cannot leave an orphan server. Output is drained into `hosting.log`
+with five retained 2 MB rotations. `.tunnel/status.json` records owned process
+IDs; the lock prevents duplicate supervisors. The Windows sign-in shortcut
+uses the same launcher. The PC must remain awake and connected.
+
+Run `.tunnel/stop-host.ps1` to request shutdown. Wait for `status.json` to
+disappear before restoring a database or starting again. To restore history,
+stop all CLI/GUI clients too, preserve the current database, copy a selected
+daily backup over its database, then run `.tunnel/start-host.ps1`. The preserved
+legacy JSON is the state at migration time and does not contain subsequent chats.
+
+The supervisor detects process exits, not every possible application hang.
+It does not keep a sleeping or powered-off computer online.

@@ -329,7 +329,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int,
                         default=config["web"].getint("port", fallback=5000))
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--production", action="store_true", help="require Waitress; refuse the development server")
     args = parser.parse_args(argv)
+    public = bool(os.getenv('LILITH_PUBLIC_HOST', '').strip())
+    if args.debug and (args.production or public):
+        print('Debug mode is unavailable for public or production hosting.', file=sys.stderr)
+        return 2
+    try:
+        from waitress import serve
+    except ImportError:
+        serve = None
+        if args.production or public:
+            print('Production hosting requires Waitress. Install requirements.txt.', file=sys.stderr)
+            return 2
 
     # None of the routes authenticate callers. Refuse every non-loopback bind,
     # not only the especially dangerous Werkzeug-debugger combination.
@@ -359,12 +371,10 @@ def main(argv: list[str] | None = None) -> int:
     listen_url = f"http://{display_host}:{args.port}"
 
     # gunicorn is POSIX-only; waitress is the cross-platform equivalent.
-    try:
-        from waitress import serve
-
+    if serve is not None:
         print(f"Lilith is listening on {listen_url}")
         serve(app, host=args.host, port=args.port, threads=4)
-    except ImportError:
+    else:
         logger.info("waitress not installed; using Flask's development server")
         print(f"Lilith is listening on {listen_url}")
         app.run(host=args.host, port=args.port, debug=False)
