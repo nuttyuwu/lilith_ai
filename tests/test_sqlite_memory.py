@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from modules import compat
@@ -32,7 +33,7 @@ class SQLiteMemoryTests(unittest.TestCase):
         self.assertTrue(store.save_memory(data))
         self.assertEqual(self.store().load_memory(), data)
         self.assertEqual(json.loads(source.read_text()), original)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
         self.assertTrue(list(self.path.parent.glob('memory.backup-*.sqlite3')))
 
@@ -59,8 +60,44 @@ class SQLiteMemoryTests(unittest.TestCase):
             self.store().load_memory()
 
     def test_future_schema_is_not_overwritten(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             db.execute('PRAGMA user_version=99')
         with self.assertRaises(ValueError):
             self.store().load_memory()
+
+    def test_backup_can_be_restored_and_retention_is_bounded(self):
+        from modules.sqlite_memory import SQLiteMemory
+        database = SQLiteMemory(self.path)
+        for day in range(1, 10):
+            (self.path.parent / f'memory.backup-2020-01-{day:02}.sqlite3').write_bytes(b'old')
+        database.backup().unlink()
+        backup = database.backup()
+        self.assertEqual(len(list(self.path.parent.glob('memory.backup-*.sqlite3'))), 7)
+        with closing(sqlite3.connect(backup)) as db:
+            self.assertEqual(db.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
+
+    def test_missing_snapshot_and_non_object_import_are_rejected(self):
+        from modules.sqlite_memory import SQLiteMemory
+        source = self.path.with_suffix('.json')
+        source.write_text('[]', encoding='utf-8')
+        with self.assertRaises(ValueError):
+            SQLiteMemory(self.path)
+        source.write_text('{}', encoding='utf-8')
+        database = SQLiteMemory(self.path)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('DELETE FROM memory')
+        with self.assertRaises(ValueError):
+            database.load()
+
+    def test_cleanup_uses_database_and_keeps_backup(self):
+        from unittest.mock import patch
+        import sanitize_memory
+        store = self.store()
+        data = store.load_memory()
+        data['conversations'] = {'default': [{'role': 'user', 'content': 'keep'}]}
+        self.assertTrue(store.save_memory(data))
+        with patch.object(sanitize_memory.compat, 'load_config', return_value=self.config):
+            self.assertEqual(sanitize_memory.main(), 0)
+        self.assertEqual(self.store().load_memory()['conversations'], data['conversations'])
+        self.assertTrue(list(self.path.parent.glob('memory.bak-*.json')))
 
