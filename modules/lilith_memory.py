@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -160,6 +161,15 @@ class LilithMemory:
         # Exact snapshot returned by load_memory (or last committed by us).
         # This is the common ancestor for conflict-aware three-way merges.
         self._baseline: dict | None = None
+        self._sqlite_store = None
+
+    def _sqlite(self):
+        if self.MEMORY_FILE.suffix.lower() not in {'.sqlite3', '.db'}:
+            return None
+        if self._sqlite_store is None or self._sqlite_store.path != self.MEMORY_FILE:
+            from modules.sqlite_memory import SQLiteMemory
+            self._sqlite_store = SQLiteMemory(self.MEMORY_FILE)
+        return self._sqlite_store
 
     # -- persona ----------------------------------------------------------
 
@@ -203,6 +213,13 @@ class LilithMemory:
 
     def load_memory(self) -> dict:
         with self._lock:
+            database = self._sqlite()
+            if database is not None:
+                data = database.load()
+                self._baseline = deepcopy(data)
+                data.setdefault('meta', {}).setdefault('user_name_set', False)
+                self._stamp = self._disk_stamp()
+                return data
             data: dict = {}
             self._stamp = self._disk_stamp()
             if self.MEMORY_FILE.exists():
@@ -316,6 +333,15 @@ class LilithMemory:
             try:
                 if not isinstance(memory, dict):
                     raise TypeError("memory must be a JSON object")
+                database = self._sqlite()
+                if database is not None:
+                    merged = database.save(memory, self._baseline, _merge_values)
+                    self._baseline = deepcopy(merged)
+                    self._stamp = self._disk_stamp()
+                    if merged is not memory:
+                        memory.clear()
+                        memory.update(deepcopy(merged))
+                    return True
                 self.MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with self._exclusive_file_lock():
                     disk = self._read_disk()
@@ -342,7 +368,7 @@ class LilithMemory:
                     memory.clear()
                     memory.update(deepcopy(merged))
                 return True
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
                 logger.error("Failed to save memory: %s", exc)
                 if tmp_created:
                     try:

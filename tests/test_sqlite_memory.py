@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -100,4 +102,48 @@ class SQLiteMemoryTests(unittest.TestCase):
             self.assertEqual(sanitize_memory.main(), 0)
         self.assertEqual(self.store().load_memory()['conversations'], data['conversations'])
         self.assertTrue(list(self.path.parent.glob('memory.bak-*.json')))
+
+    def test_separate_processes_preserve_both_writes(self):
+        import time
+        data = self.store().load_memory()
+        data['conversations'] = {'default': []}
+        self.assertTrue(self.store().save_memory(data))
+        script = '''
+import sys, time
+from pathlib import Path
+from modules import compat
+from modules.lilith_memory import LilithMemory
+config = compat.load_config()
+config['ai_config']['memory'] = sys.argv[1]
+store = LilithMemory(config=config)
+data = store.load_memory()
+Path(sys.argv[2]).touch()
+deadline = time.monotonic() + 15
+while not Path(sys.argv[3]).exists():
+    if time.monotonic() > deadline: raise RuntimeError('barrier timeout')
+    time.sleep(.01)
+data['conversations']['default'].append({'role':'user','content':sys.argv[4]})
+raise SystemExit(0 if store.save_memory(data) else 1)
+'''
+        barrier = self.path.parent / 'go'
+        children = [subprocess.Popen([sys.executable, '-c', script, str(self.path),
+                                     str(self.path.parent / f'ready-{i}'), str(barrier), str(i)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE) for i in range(2)]
+        try:
+            deadline = time.monotonic() + 15
+            while not all((self.path.parent / f'ready-{i}').exists() for i in range(2)):
+                if time.monotonic() > deadline:
+                    self.fail('writers did not reach barrier')
+                time.sleep(.01)
+            barrier.touch()
+            for child in children:
+                output = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 0, output)
+            contents = self.store().load_memory()['conversations']['default']
+            self.assertEqual({turn['content'] for turn in contents}, {'0', '1'})
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.communicate(timeout=15)
 

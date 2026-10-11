@@ -17,12 +17,12 @@ Fixes over the previous version:
 from __future__ import annotations
 
 import json
-import os
-import shutil
+import sqlite3
 import sys
 from datetime import datetime
 
 from modules import compat, persona_guard
+from modules.lilith_memory import LilithMemory
 
 def is_boilerplate(entry: dict) -> bool:
     if entry.get("role") != "assistant":
@@ -44,17 +44,17 @@ def main() -> int:
         print(f"No memory file at {memory_file} -- nothing to clean.")
         return 1
 
+    store = LilithMemory(config=config)
+    try:
+        data = store.load_memory()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        print(f'Could not load memory: {exc}')
+        return 1
     backup = memory_file.with_name(
         f"{memory_file.stem}.bak-{datetime.now():%Y%m%d-%H%M%S}.json"
     )
-    shutil.copy2(memory_file, backup)
+    backup.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
     print(f"Backup written to {backup.name}")
-
-    try:
-        data = json.loads(memory_file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        print(f"memory.json is not valid JSON: {exc}")
-        return 1
 
     total = 0
 
@@ -73,12 +73,9 @@ def main() -> int:
             print(f"  (legacy): removed {removed}")
         total += removed
 
-    # A distinct suffix from LilithMemory.save_memory's ".json.tmp": sharing
-    # it meant running this while Lilith was live had both processes writing
-    # and os.replace-ing the very same scratch file.
-    tmp = memory_file.with_suffix(".json.sanitize-tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, memory_file)
+    if not store.save_memory(data):
+        print('Could not save cleaned memory. The backup is preserved.')
+        return 1
 
     print(f"Removed {total} out-of-character entries.")
     return 0
