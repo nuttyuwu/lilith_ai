@@ -134,3 +134,10 @@ class ReplyFormatTests(unittest.TestCase):
         text, mood = self.brain._extract_state('{"reply":"another girl?!?!?!?!?!","emotion":"angry"}')
         self.assertEqual(text, 'another girl?!?')
         self.assertEqual(mood, 'angry')
+
+    def test_explicit_jealous_outburst_cannot_keep_neutral_face(self):
+        from modules.character_runtime import align_emotion
+        text = 'WHAT?! you forgot our date to watch another girl?!'
+        self.assertEqual(align_emotion(text, 'thinking', 'yandere', self.brain.valid_states), 'angry')
+        self.assertEqual(align_emotion('have fun with another girl', 'smile', 'yandere', self.brain.valid_states), 'smile')
+        self.assertEqual(align_emotion(text, 'thinking', 'soft', self.brain.valid_states), 'thinking')
