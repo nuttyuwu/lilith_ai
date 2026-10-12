@@ -206,6 +206,8 @@ def export_training(csv_path, destination):
 
 
 def main(argv=None):
+    from modules import compat
+    compat.enable_utf8_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('questions', nargs='?', default=str(ROOT.parent.parent / 'Mira Questions.txt'))
     parser.add_argument('--mode', choices=(*MODES, 'both'), help='override modes in input; both compares every question')
