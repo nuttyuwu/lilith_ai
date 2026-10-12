@@ -66,3 +66,71 @@ class ReplyFormatTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.brain.lilith_reply('test')
         with self.assertRaises(ValueError): list(self.brain.reply_stream('test'))
         self.assertEqual(before, self.brain.get_history())
+
+    def test_empty_dialogue_is_rejected_in_both_formats(self):
+        for raw in ('', '[state:smile]', '{"reply":"[state:sad]","emotion":"sad"}'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                self.brain._extract_state(raw)
+
+    def test_json_fences_fields_and_types(self):
+        self.assertEqual(self.brain._extract_state('```json\n{"reply":"hi","emotion":"smile"}\n```'), ('hi', 'smile'))
+        for raw in ('```json\n{"reply":"hi"}', '[]', '{"reply":"hi","emotion":null}', '{"reply":"hi","emotion":"idle","extra":1}'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                self.brain._extract_state(raw)
+
+    def test_sentence_cap_has_whole_stream_parity(self):
+        from modules.reply_format import ValidatedStream
+        raw = '{"reply":"One. Two. Three.","emotion":"thinking"}'
+        stream = ValidatedStream(1, self.brain.valid_states)
+        self.assertEqual(stream.feed(raw), '')
+        self.assertEqual(stream.finish(), 'One.')
+
+    def test_lilith_can_keep_legacy_format(self):
+        config = compat.load_config()
+        config['ai_config']['memory'] = str(Path(self.tmp.name) / 'lilith.json')
+        lilith = LilithAI(config=profile_config(config, 'lilith'), NO_AI=True)
+        self.assertFalse(lilith.structured_replies)
+        self.assertEqual(lilith._extract_state('hi [state:smile]'), ('hi', 'smile'))
+
+    def test_stop_and_audio_questions_do_not_depend_on_model(self):
+        from unittest.mock import Mock
+        self.brain.client = Mock()
+        self.brain.client.get_response.side_effect = AssertionError('Model must not run')
+        self.assertIn('stopped', self.brain.lilith_reply('stop roleplay', temperament='yandere'))
+        self.assertIn('fictional AI version of Mira', self.brain.lilith_reply('Are you the real Mira?'))
+        events = list(self.brain.reply_stream('Can you hear my voice?', temperament='soft'))
+        self.assertIn("can't hear", events[-1][1]['reply'])
+        self.brain.client.get_response.assert_not_called()
+        history = self.brain.get_history()
+        self.assertIn('Roleplay is stopped in this room', self.brain._build_payload(history, 'hello')[0]['content'])
+        self.assertNotIn('Roleplay is stopped in this room', self.brain._build_payload(history, 'resume roleplay')[0]['content'])
+
+    def test_native_schema_path_validates_and_preserves_emotion(self):
+        from unittest.mock import Mock
+        self.brain.client = Mock()
+        self.brain.client.get_structured_response.return_value = '{"reply":"HEY!","emotion":"angry"}'
+        events = list(self.brain.reply_stream('fictional jealousy', temperament='yandere'))
+        self.assertEqual(events[-1][1]['emotion'], 'angry')
+        schema = self.brain.client.get_structured_response.call_args.args[1]
+        self.assertFalse(schema['additionalProperties'])
+        self.assertIn('angry', schema['properties']['emotion']['enum'])
+        self.brain.client.stream_response.assert_not_called()
+
+    def test_llama_chat_receives_schema_without_changing_plain_calls(self):
+        from unittest.mock import Mock
+        from modules._llama_iface import AIInterface_Llama
+        backend = object.__new__(AIInterface_Llama)
+        backend._has_chat_api = True
+        backend.max_tokens = 160
+        backend.temperature = .4
+        backend.llm = Mock()
+        backend.llm.create_chat_completion.return_value = {'choices':[{'message':{'content':'{"reply":"hi","emotion":"idle"}'}}]}
+        backend.get_structured_response([], {'type':'object'})
+        self.assertIn('response_format', backend.llm.create_chat_completion.call_args.kwargs)
+        backend.get_response([])
+        self.assertNotIn('response_format', backend.llm.create_chat_completion.call_args.kwargs)
+
+    def test_dramatic_punctuation_does_not_become_spam(self):
+        text, mood = self.brain._extract_state('{"reply":"another girl?!?!?!?!?!","emotion":"angry"}')
+        self.assertEqual(text, 'another girl?!?')
+        self.assertEqual(mood, 'angry')
