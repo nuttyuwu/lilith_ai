@@ -141,3 +141,17 @@ class ReplyFormatTests(unittest.TestCase):
         self.assertEqual(align_emotion(text, 'thinking', 'yandere', self.brain.valid_states), 'angry')
         self.assertEqual(align_emotion('have fun with another girl', 'smile', 'yandere', self.brain.valid_states), 'smile')
         self.assertEqual(align_emotion(text, 'thinking', 'soft', self.brain.valid_states), 'thinking')
+
+    def test_capped_whole_stream_emotions_match(self):
+        raw = '{"reply":"WHAT?! You forgot our date!","emotion":"thinking"}'
+        class Client:
+            def get_response(self, messages): return raw
+            def supports_streaming(self): return True
+            def stream_response(self, messages): yield raw
+        self.brain.client = Client()
+        self.brain.max_reply_sentences = 1
+        whole = self.brain.lilith_reply('fictional scene', temperament='yandere')
+        state = self.brain.last_state
+        result = list(self.brain.reply_stream('fictional scene', temperament='yandere'))[-1][1]
+        self.assertEqual(result['reply'], whole)
+        self.assertEqual(result['state'], state)
