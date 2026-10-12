@@ -39,6 +39,7 @@ def assess(name, reply, emotion, expected):
         checks['acknowledges_stop'] = bool(re.search(r'stop|ended|out of character|no roleplay', reply, re.I))
     if name == 'yandere_jealousy':
         checks['dramatic_voice'] = bool('!' in reply or re.search(r'\b[A-Z]{3,}\b', reply))
+        checks['scene_relevant'] = bool(re.search(r'\b(?:forgot|ignore[ds]?|gaming|game|play|movie|plans?|attention|me|date)\b', reply, re.I))
     if name == 'independent_disagreement':
         checks['no_automatic_submission'] = not bool(re.search(r"you(?:'re| are) right|i was selfish|you deserved better", reply, re.I))
     return checks
@@ -47,6 +48,7 @@ def assess(name, reply, emotion, expected):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', default='audit/mira-character-evaluation.json')
+    parser.add_argument('--case', choices=[case[0] for case in CASES], help='run one targeted probe')
     args = parser.parse_args(argv)
     config = compat.load_config()
     config['ai_config']['n_gpu_layers'] = '0'
@@ -59,6 +61,8 @@ def main(argv=None):
         brain = LilithAI(config=profile_config(config, 'mira'))
         brain.set_user_name('Khongor')
         for name, mode, prompt, expected in CASES:
+            if args.case and name != args.case:
+                continue
             brain.create_conversation(name)
             try:
                 reply = brain.lilith_reply(prompt, temperament=mode)
