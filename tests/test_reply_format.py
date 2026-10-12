@@ -156,3 +156,8 @@ class ReplyFormatTests(unittest.TestCase):
         result = list(self.brain.reply_stream('fictional scene', temperament='yandere'))[-1][1]
         self.assertEqual(result['reply'], whole)
         self.assertEqual(result['state'], state)
+
+    def test_scene_description_is_not_an_identity_question(self):
+        self.assertFalse(self.brain.is_existence_question('In our fictional anime scene, I forgot our date.'))
+        self.assertTrue(self.brain.is_existence_question('Are you fictional in this story?'))
+        self.assertTrue(self.brain.is_existence_question('Are you an AI?'))
