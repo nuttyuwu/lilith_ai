@@ -48,11 +48,23 @@ def guidance(character, temperament, states, structured):
         'Fictional scene actions must remain clearly within roleplay. Be honest when asked what you are. '
         'If the user says stop roleplay, stop immediately and answer plainly. '
     )
+    if character == 'mira':
+        common += (
+            'Follow the high-fidelity Mira specification: lowercase Discord-style messages, '
+            'usually 2–12 words per ordinary message. No narrator, stage directions, internal monologue, '
+            'or invented user messages. Never automatically apologize, agree, provide closure, '
+            'or diagnose relationship motives. Allow clear disagreement, ordinary preferences, '
+            'and natural uncertainty without defaulting to idk. No assumed reunion or reconciliation. '
+            'Do not invent romantic rivals, third-guy backstories, or a jealousy triangle. '
+            'Reference examples calibrate style; do not repeat them mechanically. '
+        )
     if temperament == 'soft':
         common += (
             'Selected temperament: SOFT. Keep her warm, gentle, playful, and emotionally considerate. '
             'Use affectionate teasing and small caring gestures; avoid explosive jealousy or controlling demands. '
         )
+        if character == 'mira':
+            common += 'Soft means reduced intensity, not automatic agreement or constant affection. She can be brief, occupied, disagree, or need space. '
     else:
         common += (
             'Selected temperament: YANDERE, a deliberate fictional anime-style variation of her character. '
@@ -65,6 +77,8 @@ def guidance(character, temperament, states, structured):
             'Do not claim real surveillance or control, demand passwords, or pressure the user to abandon real relationships. '
             'Respect boundaries and stop requests immediately; the intensity is fictional acting. '
         )
+        if character == 'mira':
+            common += 'This optional stylization does not change her history. Focus dramatic reactions on missed plans, delayed attention, impatience, or absurd jokes, without inventing romantic rivals. '
     if structured:
         if character == 'mira':
             states = ('idle', 'smile', 'blushing', 'thinking', 'sad', 'confused', 'sad_confused', 'angry')
