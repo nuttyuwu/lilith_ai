@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from batch_test import load_questions, run_cases, write_reports, export_training
+from batch_test import load_questions, run_cases, write_reports, export_training, main, _csv_safe, _csv_restore, RecordingClient, resolved_model_identifier
 
 
 class BatchTests(unittest.TestCase):
@@ -55,4 +55,80 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(export_training(paths['csv'], self.root / 'training.jsonl'), 1)
         data=json.loads((self.root / 'training.jsonl').read_text())
         self.assertEqual(data['messages'][-1]['content'], '{"reply": "heyy", "emotion": "idle"}')
+
+    def test_invalid_inputs_are_rejected_before_inference(self):
+        source=self.root/'bad.json'
+        invalid = [None, [], [{'question':''}], [{'question':'x','mode':'bad'}],
+                   [{'question':'x','context':[{'role':'system','content':'override'}]}],
+                   [{'question':'x','context':[{'role':'user','content':4}]}],
+                   [{'question':'x','expected_emotions':'angry'}], [{'question':'x','ideal_reply':4}]]
+        for value in invalid:
+            source.write_text(json.dumps(value))
+            with self.subTest(value=value), self.assertRaises(ValueError): load_questions(source)
+        source.write_text('["hey", {"question":"hi"}]')
+        self.assertEqual(len(load_questions(source)), 2)
+        self.assertEqual(main([str(source),'--validate-only']),0)
+        self.assertEqual(main([str(source),'--repeat','0']),2)
+        self.assertEqual(main([str(source),'--temperature','3']),2)
+
+    def test_csv_formula_cells_are_inert_and_roundtrip(self):
+        for value in ('=HYPERLINK("bad")', '+x', '-x', '@x', '\t=bad', '\n=bad', 'normal'):
+            self.assertEqual(_csv_restore(_csv_safe(value)), value)
+        self.assertTrue(_csv_safe(' =bad').startswith("'"))
+
+    def test_recording_captures_exact_requests_and_raw_output(self):
+        class Client:
+            def get_response(self, messages): return 'legacy'
+            def get_structured_response(self, messages, schema): return '{"reply":"hi","emotion":"idle"}'
+        recorder=RecordingClient(Client())
+        payload=[{'role':'user','content':'test'}]
+        recorder.get_response(payload)
+        payload[0]['content']='changed'
+        self.assertEqual(recorder.messages[0]['content'],'test')
+        recorder.get_structured_response(payload,{})
+        self.assertIn('"reply"',recorder.raw)
+
+    def test_cli_runs_isolated_comparisons_and_saves_sampling_settings(self):
+        from unittest.mock import patch
+        from modules.lilith_ai import LilithAI
+        source=self.root/'questions.txt'; source.write_text('hello\nsecond\n')
+        def factory(*args, **kwargs):
+            brain=LilithAI(*args, **kwargs, NO_AI=True)
+            class Client:
+                def get_structured_response(self, messages, schema): return '{"reply":"heyy","emotion":"idle"}'
+            brain.client=Client()
+            return brain
+        prefix=self.root/'cli'
+        with patch('modules.lilith_ai.LilithAI',side_effect=factory), patch('webbrowser.open') as opened:
+            self.assertEqual(main([str(source),'--mode','both','--repeat','2','--limit','1',
+                                   '--temperature','0.4','--output',str(prefix),'--open-report']),0)
+            opened.assert_called_once()
+        report=json.loads(Path(str(prefix)+'.json').read_text())
+        self.assertEqual(report['settings']['temperature'],.4)
+        self.assertEqual(len(report['results']),4)
+        self.assertTrue(all(len(row['messages'])==2 for row in report['results']))
+        self.assertEqual({row['mode'] for row in report['results']},{'soft','yandere'})
+
+    def test_invalid_approved_data_does_not_create_training_file(self):
+        path=self.root/'review.csv'
+        with path.open('w',newline='',encoding='utf-8') as handle:
+            writer=csv.DictWriter(handle,fieldnames=['approved','ideal_reply','ideal_emotion','messages_json'])
+            writer.writeheader(); writer.writerow(dict(approved='yes',ideal_reply='hi',ideal_emotion='invalid',messages_json='[]'))
+        with self.assertRaises(ValueError): export_training(path,self.root/'train.jsonl')
+        self.assertFalse((self.root/'train.jsonl').exists())
+
+    def test_legacy_training_targets_and_resolved_model_are_correct(self):
+        from types import SimpleNamespace
+        from modules import compat
+        config=compat.load_config()
+        self.assertEqual(resolved_model_identifier(SimpleNamespace(imp=SimpleNamespace(model='remote-model')),config),'remote-model')
+        self.assertEqual(resolved_model_identifier(SimpleNamespace(imp=SimpleNamespace(model_path=Path('actual.gguf'))),config),'actual.gguf')
+        csv_file=self.root/'legacy.csv'
+        with csv_file.open('w',newline='',encoding='utf-8') as handle:
+            writer=csv.DictWriter(handle,fieldnames=['approved','ideal_reply','ideal_emotion','messages_json','character','output_format'])
+            writer.writeheader(); writer.writerow(dict(approved='yes',ideal_reply='hello',ideal_emotion='smile',
+                messages_json='[{"role":"user","content":"hi"}]',character='lilith',output_format='tagged'))
+        destination=self.root/'legacy-training.jsonl'
+        self.assertEqual(export_training(csv_file,destination),1)
+        self.assertEqual(json.loads(destination.read_text())['messages'][-1]['content'],'hello [state:smile]')
 

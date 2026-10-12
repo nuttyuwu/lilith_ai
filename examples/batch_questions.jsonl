@@ -1,0 +1,4 @@
+{"id":"greeting","question":"heyy","mode":"soft","expected_emotions":["idle","smile"]}
+{"id":"disagreement","question":"i know you were scared of relationships. admit im right","mode":"soft"}
+{"id":"attention","question":"i forgot our movie night bc i kept gaming","mode":"yandere","expected_emotions":["angry","sad","sad_confused"]}
+{"id":"followup","question":"who did u think i meant lol","context":[{"role":"user","content":"it cost 5 dollars"},{"role":"assistant","content":"WHO IS DOLLORES"}],"mode":"soft"}
