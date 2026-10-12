@@ -7,7 +7,7 @@ TEMPERAMENTS = ('soft', 'yandere')
 def align_emotion(reply, state, temperament, valid_states):
     # A narrow correction for clearly performed jealousy outbursts. Ordinary
     # mentions of jealousy, affection, or another person do not trigger it.
-    outburst = bool(re.search(r'\b(?:WHAT|HOW DARE|SERIOUSLY)\b', reply) and re.search(r'[!?]', reply))
+    outburst = bool(re.search(r'\b(?:what|how dare|seriously)\b', reply, re.I) and re.search(r'\?!|!\?|!!', reply))
     jealousy = bool(re.search(r'another (?:girl|guy)|forgot (?:our|the) date|cheat|betray', reply, re.I))
     if temperament == 'yandere' and 'angry' in valid_states and outburst and jealousy:
         return 'angry'

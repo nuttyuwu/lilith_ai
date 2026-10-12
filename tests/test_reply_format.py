@@ -139,6 +139,7 @@ class ReplyFormatTests(unittest.TestCase):
         from modules.character_runtime import align_emotion
         text = 'WHAT?! you forgot our date to watch another girl?!'
         self.assertEqual(align_emotion(text, 'thinking', 'yandere', self.brain.valid_states), 'angry')
+        self.assertEqual(align_emotion(text.lower(), 'thinking', 'yandere', self.brain.valid_states), 'angry')
         self.assertEqual(align_emotion('have fun with another girl', 'smile', 'yandere', self.brain.valid_states), 'smile')
         self.assertEqual(align_emotion(text, 'thinking', 'soft', self.brain.valid_states), 'thinking')
 
