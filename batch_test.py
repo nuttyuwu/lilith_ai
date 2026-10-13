@@ -6,6 +6,7 @@ from copy import deepcopy
 import csv
 from datetime import datetime
 import html
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -212,6 +213,7 @@ def main(argv=None):
     parser.add_argument('questions', nargs='?', default=str(ROOT.parent.parent / 'Mira Questions.txt'))
     parser.add_argument('--mode', choices=(*MODES, 'both'), help='override modes in input; both compares every question')
     parser.add_argument('--character', choices=('mira','lilith'), default='mira')
+    parser.add_argument('--persona', help='test a UTF-8 prompt file without changing the live persona')
     parser.add_argument('--temperature', type=float, help='default: actual configured temperature')
     parser.add_argument('--repeat', type=int, default=1)
     parser.add_argument('--limit', type=int)
@@ -232,6 +234,12 @@ def main(argv=None):
         if args.temperature is not None and not 0 <= args.temperature <= 2:
             raise ValueError('temperature must be between 0 and 2')
         cases = load_questions(args.questions)
+        persona = Path(args.persona).resolve() if args.persona else None
+        if persona is not None:
+            if persona.stat().st_size > 2_000_000:
+                raise ValueError('Persona file is too large (maximum 2 MB)')
+            if not persona.read_text(encoding='utf-8-sig').strip():
+                raise ValueError('Persona file must contain nonempty text')
         if args.limit:
             cases = cases[:args.limit]
         if args.validate_only:
@@ -259,8 +267,14 @@ def main(argv=None):
             write_reports(results, prefix, settings)
         with tempfile.TemporaryDirectory() as folder:
             config['ai_config']['memory'] = str(Path(folder) / 'batch.json')
-            brain = LilithAI(config=profile_config(config, args.character))
+            character_config = profile_config(config, args.character)
+            if persona is not None:
+                character_config['ai_config']['persona'] = str(persona)
+            brain = LilithAI(config=character_config)
             brain.set_user_name('Khongor')
+            persona_path = compat.project_path(character_config['ai_config']['persona'])
+            settings['persona'] = str(persona_path.resolve())
+            settings['persona_sha256'] = hashlib.sha256(persona_path.read_bytes()).hexdigest()
             settings['model'] = resolved_model_identifier(brain.client, config)
             brain.client = RecordingClient(brain.client)
             results = run_cases(brain, cases, mode=args.mode, repeat=args.repeat, on_result=progress)
