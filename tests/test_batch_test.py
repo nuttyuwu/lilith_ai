@@ -7,6 +7,36 @@ from batch_test import load_questions, run_cases, write_reports, export_training
 
 
 class BatchTests(unittest.TestCase):
+    def test_persona_override_is_isolated_recorded_and_validated_before_loading(self):
+        from unittest.mock import patch
+        from modules.lilith_ai import LilithAI
+        import hashlib
+        source = self.root / 'questions.txt'
+        source.write_text('hello\n', encoding='utf-8')
+        persona = self.root / 'candidate.txt'
+        persona.write_text('A distinct candidate persona.', encoding='utf-8')
+        def factory(*args, **kwargs):
+            brain = LilithAI(*args, **kwargs, NO_AI=True)
+            self.assertEqual(brain.persona, persona.read_text(encoding='utf-8'))
+            class Client:
+                def get_structured_response(self, messages, schema):
+                    return '{"reply":"hey","emotion":"smile"}'
+            brain.client = Client()
+            return brain
+        prefix = self.root / 'candidate-run'
+        with patch('modules.lilith_ai.LilithAI', side_effect=factory) as load:
+            self.assertEqual(main([str(source), '--persona', str(persona), '--output', str(prefix)]), 0)
+            load.assert_called_once()
+        report = json.loads(Path(str(prefix) + '.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['settings']['persona'], str(persona.resolve()))
+        self.assertEqual(report['settings']['persona_sha256'], hashlib.sha256(persona.read_bytes()).hexdigest())
+        self.assertIn('A distinct candidate persona.', report['results'][0]['messages'][0]['content'])
+        with patch('modules.lilith_ai.LilithAI') as load:
+            self.assertEqual(main([str(source), '--persona', str(self.root / 'missing.txt'), '--validate-only']), 2)
+            persona.write_text('   ', encoding='utf-8')
+            self.assertEqual(main([str(source), '--persona', str(persona), '--validate-only']), 2)
+            load.assert_not_called()
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
