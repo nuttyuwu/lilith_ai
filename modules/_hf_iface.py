@@ -250,3 +250,61 @@ class AIInterface_HF:
         # Decode only what the model added, not the prompt we fed it.
         generated = output[0][prompt_length:]
         return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+    def stream_response(self, messages: list):
+        """Yield decoded text as transformers generates it.
+
+        ``generate`` is blocking and has no generator form, so it runs on a
+        worker thread and pushes through a TextIteratorStreamer. The thread is
+        a daemon: if the caller abandons the stream (a closed browser tab, the
+        sentence cap reached), generation finishes into a queue nobody reads
+        and the process can still exit.
+        """
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model must be loaded before generating a response.")
+
+        import threading
+
+        import torch
+        from transformers import TextIteratorStreamer
+
+        inputs = self.tokenizer(self._render(messages), return_tensors="pt").to(
+            self.model.device
+        )
+        streamer = TextIteratorStreamer(
+            self.tokenizer, skip_prompt=True, skip_special_tokens=True
+        )
+
+        failure: list[BaseException] = []
+
+        def generate() -> None:
+            try:
+                with torch.no_grad():
+                    self.model.generate(
+                        **inputs,
+                        max_new_tokens=self.max_tokens,
+                        do_sample=True,
+                        temperature=self.temperature,
+                        top_p=self.top_p,
+                        top_k=self.top_k,
+                        pad_token_id=(
+                            self.tokenizer.pad_token_id
+                            if self.tokenizer.pad_token_id is not None
+                            else self.tokenizer.eos_token_id
+                        ),
+                        streamer=streamer,
+                    )
+            except BaseException as exc:  # surfaced on the consuming thread
+                failure.append(exc)
+                streamer.end()
+
+        worker = threading.Thread(target=generate, daemon=True)
+        worker.start()
+
+        for text in streamer:
+            if text:
+                yield text
+        if failure:
+            # Without this the generator would just stop, and a crashed
+            # generation would look like a very short reply.
+            raise failure[0]

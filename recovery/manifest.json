@@ -1,0 +1,35 @@
+{
+  "created": "2026-11-03",
+  "encryption": "ZIP AES-256",
+  "files": 125,
+  "archive_sha256": "01c92c4d38c89c7828af0235999a36c06422e5a417c7a7f8219d62d36d27ddd0",
+  "parts": [
+    {
+      "file": "private-state.zip.001",
+      "bytes": 47185920,
+      "sha256": "45d9aa81d32e5adf2ab7e50139df6bca2b8fe6cdd9c28bc37c55cb25aa95508e"
+    },
+    {
+      "file": "private-state.zip.002",
+      "bytes": 47185920,
+      "sha256": "bea810ba3d9c3a9cf337c5b5c799f5458295e3be2a6844ef2f63cd6fe53af326"
+    },
+    {
+      "file": "private-state.zip.003",
+      "bytes": 47185920,
+      "sha256": "1df1ba2dff9af73f2eb3e9c4c2acc6d5f543bb0685879b88c712bd547c1ce4e3"
+    },
+    {
+      "file": "private-state.zip.004",
+      "bytes": 47185920,
+      "sha256": "ad12ed1f06996a4324c4ce6736b23dba5d245942c31c036eee186c59e6dc2afc"
+    },
+    {
+      "file": "private-state.zip.005",
+      "bytes": 4399513,
+      "sha256": "a0632e500f6a2e0ce95414b786e91c3f8f1faa319bba470a4aa45ace9ea34215"
+    }
+  ],
+  "model_excluded": "models/Lilith_AI_8B_Q4_0.gguf; see docs/model-provenance.md",
+  "excluded": "venv, Git objects, generated public site, model weights and runtime locks/status/WAL; SQLite databases captured with backup API"
+}

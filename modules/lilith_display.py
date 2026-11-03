@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 # Lets 'room' and 'glass' share one emotion vocabulary despite having
 # different asset sets, and makes adding a new place a drop-in operation.
 EMOTION_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "blushing":       ("blushing", "smile", "idle"),
+    "angry":          ("angry", "dissapointed", "sad", "idle"),
+    "sad_confused":   ("sad_confused", "thinking_sad", "sad", "idle"),
     "idle":           ("idle",),
     "blinking":       ("blinking", "idle"),
     "smile":          ("smile", "happy", "idle"),
@@ -178,6 +181,14 @@ class LilithDisplay:
         return None
 
     def image_for(self, state: str) -> Path | None:
+        if self.place == "mira" and state == "blinking":
+            mood = self.resolve_state(self.LAST_SHOWN_STATE or "idle")
+            blink_state = f"{mood}_blink"
+            if blink_state in self._available_states:
+                return self.ASSETS_PATH / self.place / f"{blink_state}.png"
+            # Keep the expression still rather than blinking with another mood.
+            if mood and mood != "blinking":
+                return self.ASSETS_PATH / self.place / f"{mood}.png"
         resolved = self.resolve_state(state)
         if resolved is None:
             return None

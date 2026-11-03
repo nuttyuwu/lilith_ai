@@ -195,7 +195,10 @@ class AIInterface_Llama:
                 prompt += f"Assistant: {content}\n"
         return prompt + "Assistant: "
 
-    def get_response(self, messages: list) -> str:
+    def get_structured_response(self, messages, schema):
+        return self.get_response(messages, response_format={'type':'json_object', 'schema':schema})
+
+    def get_response(self, messages: list, response_format=None) -> str:
 
         if self._has_chat_api:
             try:
@@ -204,6 +207,7 @@ class AIInterface_Llama:
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     top_p=0.9,
+                    **({'response_format': response_format} if response_format is not None else {}),
                 )
                 choice = result["choices"][0]
                 return (choice.get("message", {}).get("content") or "").strip()
@@ -233,11 +237,68 @@ class AIInterface_Llama:
                         exc,
                     )
 
+        options = {}
+        if response_format is not None:
+            import json
+            from llama_cpp import LlamaGrammar
+            options['grammar'] = LlamaGrammar.from_json_schema(json.dumps(response_format['schema']), verbose=False)
         output = self.llm(
             self._messages_to_prompt(messages),
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             top_p=0.9,
             stop=["User:", "</s>", "<|eot_id|>"],
+            **options,
         )
         return (output["choices"][0]["text"] or "").strip()
+
+    def stream_response(self, messages: list):
+        """Yield tokens as llama.cpp produces them.
+
+        Falls back to the raw-prompt form on the same conditions as
+        ``get_response``. A streaming call that fails before its first token
+        can still be retried whole; one that fails midway cannot, so the
+        exception propagates and the caller reports a broken turn rather than
+        silently regenerating text the user already watched appear.
+        """
+        if self._has_chat_api:
+            produced = False
+            try:
+                for part in self.llm.create_chat_completion(
+                    messages=messages,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    top_p=0.9,
+                    stream=True,
+                ):
+                    delta = part["choices"][0].get("delta") or {}
+                    text = delta.get("content") or ""
+                    if text:
+                        produced = True
+                        yield text
+                return
+            except Exception as exc:
+                # Once text has been shown, no fallback is safe: restarting
+                # generation would repeat or contradict what the user read.
+                if produced or self._is_context_overflow(exc):
+                    raise
+                if self._is_missing_chat_template(exc):
+                    logger.warning(
+                        "Model has no usable chat template (%s); using raw prompts", exc
+                    )
+                    self._has_chat_api = False
+                else:
+                    logger.warning("Streaming chat completion failed (%s)", exc)
+                    raise
+
+        for part in self.llm(
+            self._messages_to_prompt(messages),
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=0.9,
+            stop=["User:", "</s>", "<|eot_id|>"],
+            stream=True,
+        ):
+            text = part["choices"][0].get("text") or ""
+            if text:
+                yield text

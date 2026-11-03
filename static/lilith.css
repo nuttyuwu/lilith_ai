@@ -1,0 +1,480 @@
+/* Lilith -- soft pink on black, visual-novel layout.
+   Portrait fills the stage; the dialogue box floats over its lower edge. */
+
+:root {
+    --rose: #f0a8c4;
+    --rose-deep: #8d3f60;
+    --void: #08060a;
+    --ink: #f7ecf1;
+    --ink-soft: rgba(247, 236, 241, 0.58);
+    --glass: 0.62;
+    --portrait: 88;
+    --text-scale: 1;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+    margin: 0;
+    background: var(--void);
+    color: var(--ink);
+    font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+    font-size: calc(1rem * var(--text-scale));
+    overflow: hidden;
+}
+
+/* Atmosphere: a warm rose bloom behind her, and a vignette pulling the
+   edges into the dark so the portrait is what the eye lands on. */
+.veil {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(60% 45% at 50% 38%,
+            color-mix(in srgb, var(--rose) 14%, transparent), transparent 70%),
+        radial-gradient(120% 90% at 50% 50%, transparent 45%, var(--void) 100%);
+    z-index: 2;
+}
+
+/* ── Stage ─────────────────────────────────────────────────────────── */
+
+.stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+}
+
+#portrait {
+    height: calc(var(--portrait) * 1vh);
+    max-width: 96vw;
+    object-fit: contain;
+    filter: drop-shadow(0 30px 70px rgba(0, 0, 0, 0.75));
+    transition: opacity 0.35s var(--ease);
+}
+
+/* ── Dialogue ──────────────────────────────────────────────────────── */
+
+.dialogue {
+    position: fixed;
+    left: 50%;
+    bottom: clamp(16px, 3vh, 34px);
+    transform: translateX(-50%);
+    width: min(900px, 92vw);
+    z-index: 3;
+    padding: 22px 26px 18px;
+    border-radius: 20px;
+    border: 1px solid color-mix(in srgb, var(--rose) 22%, transparent);
+    background: rgba(16, 9, 14, var(--glass));
+    backdrop-filter: blur(14px) saturate(1.1);
+    box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.nameplate {
+    position: absolute;
+    top: -13px;
+    left: 26px;
+    padding: 3px 14px;
+    border-radius: 999px;
+    background: linear-gradient(140deg, var(--rose), var(--rose-deep));
+    color: #1a0d15;
+    font-size: 0.76em;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: lowercase;
+}
+
+.echo {
+    margin: 0 0 8px;
+    color: var(--ink-soft);
+    font-size: 0.86em;
+    font-style: italic;
+}
+
+.lines {
+    min-height: 3.4em;
+    max-height: 34vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    font-size: 1.16em;
+    color: var(--ink);
+}
+
+/* The cursor only shows while text is actually arriving. */
+.lines.writing::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -0.16em;
+    background: var(--rose);
+    animation: blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+.composer {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.composer input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 13px;
+    background: rgba(0, 0, 0, 0.42);
+    color: var(--ink);
+    font: inherit;
+    outline: none;
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.composer input::placeholder { color: rgba(247, 236, 241, 0.34); }
+
+.composer input:focus {
+    border-color: color-mix(in srgb, var(--rose) 55%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--rose) 14%, transparent);
+}
+
+.composer button {
+    width: 50px;
+    border: 1px solid color-mix(in srgb, var(--rose) 30%, transparent);
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--rose) 15%, transparent);
+    color: var(--rose);
+    font-size: 1.15em;
+    cursor: pointer;
+    transition: background 0.2s var(--ease), transform 0.12s var(--ease);
+}
+
+.composer button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--rose) 28%, transparent);
+}
+
+.composer button:active:not(:disabled) { transform: scale(0.94); }
+
+/* ── Settings ──────────────────────────────────────────────────────── */
+
+.gear {
+    position: fixed;
+    top: 18px;
+    right: 20px;
+    z-index: 4;
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    background: rgba(16, 9, 14, 0.55);
+    backdrop-filter: blur(10px);
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 0.84em;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.gear:hover:not(:disabled) {
+    color: var(--rose);
+    border-color: color-mix(in srgb, var(--rose) 40%, transparent);
+}
+
+.drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 6;
+    width: min(400px, 92vw);
+    height: 100%;
+    overflow-y: auto;
+    padding: 22px 24px 60px;
+    background: rgba(11, 7, 11, 0.94);
+    backdrop-filter: blur(20px);
+    border-left: 1px solid color-mix(in srgb, var(--rose) 18%, transparent);
+    box-shadow: -30px 0 70px rgba(0, 0, 0, 0.6);
+    animation: slide-in 0.32s var(--ease);
+}
+
+@keyframes slide-in { from { transform: translateX(100%); } }
+
+.drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.drawer-head h2 {
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--rose);
+}
+
+.drawer-head button {
+    border: none;
+    background: none;
+    color: var(--ink-soft);
+    font-size: 1.6em;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.group {
+    padding: 16px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.group h3 {
+    margin: 0 0 12px;
+    font-size: 0.74em;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 13px;
+    font-size: 0.92em;
+}
+
+.row span { display: flex; flex-direction: column; }
+
+.row small {
+    margin-top: 2px;
+    color: var(--ink-soft);
+    font-size: 0.82em;
+}
+
+.row input[type="range"] {
+    width: 130px;
+    accent-color: var(--rose);
+}
+
+.switch input[type="checkbox"] {
+    width: 19px;
+    height: 19px;
+    accent-color: var(--rose);
+    cursor: pointer;
+}
+
+.row.buttons { flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+
+.linky {
+    padding: 6px 13px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.88em;
+    cursor: pointer;
+    transition: border-color 0.18s var(--ease), color 0.18s var(--ease);
+}
+
+.linky:hover {
+    color: var(--rose);
+    border-color: color-mix(in srgb, var(--rose) 45%, transparent);
+}
+
+.linky.danger:hover { color: #ff9aa6; border-color: rgba(255, 154, 166, 0.45); }
+
+.swatches { display: flex; gap: 8px; }
+
+.swatches button {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s var(--ease);
+}
+
+.swatches button:hover { transform: scale(1.14); }
+.swatches button[aria-checked="true"] { border-color: var(--ink); }
+
+.rooms { margin: 0 0 12px; padding: 0; list-style: none; }
+
+.rooms li { margin-bottom: 6px; }
+
+.rooms button {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 0.9em;
+    text-align: left;
+    cursor: pointer;
+}
+
+.rooms button[aria-current="true"] {
+    color: var(--rose);
+    border-color: color-mix(in srgb, var(--rose) 42%, transparent);
+    background: color-mix(in srgb, var(--rose) 8%, transparent);
+}
+
+.transcript {
+    max-height: 240px;
+    margin-top: 12px;
+    padding: 12px;
+    overflow-y: auto;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.4);
+    font-size: 0.84em;
+    line-height: 1.55;
+}
+
+.transcript p { margin: 0 0 9px; }
+.transcript .who { color: var(--rose); }
+.transcript .you { color: var(--ink-soft); }
+
+.fine {
+    margin: 0 0 12px;
+    color: var(--ink-soft);
+    font-size: 0.84em;
+    line-height: 1.55;
+}
+
+/* ── Consent gate ──────────────────────────────────────────────────── */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(4, 2, 5, 0.82);
+    backdrop-filter: blur(8px);
+}
+
+.overlay[hidden] { display: none; }
+
+.consent-gate {
+    width: min(560px, 100%);
+    padding: 28px 30px;
+    border: 1px solid color-mix(in srgb, var(--rose) 24%, transparent);
+    border-radius: 18px;
+    background: #120b11;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+.consent-gate h2 {
+    margin: 0 0 14px;
+    font-size: 1.15em;
+    color: var(--rose);
+}
+
+.safety-notice {
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 170, 190, 0.2);
+    border-radius: 12px;
+    background: rgba(90, 30, 50, 0.24);
+    color: #f3dde4;
+    font-size: 0.9em;
+    line-height: 1.6;
+}
+
+.consent-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+
+.consent-actions button {
+    padding: 10px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 11px;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+}
+
+.consent-actions .primary {
+    border-color: transparent;
+    background: linear-gradient(140deg, var(--rose), var(--rose-deep));
+    color: #180c13;
+    font-weight: 700;
+}
+
+/* Always on screen, collapsed to one dim line. It is a disclosure, not
+   decoration: it must not be dismissible, only foldable. */
+.disclosure {
+    position: fixed;
+    top: 18px;
+    left: 20px;
+    z-index: 4;
+    max-width: min(430px, 60vw);
+}
+
+.disclosure summary {
+    display: inline-block;
+    padding: 8px 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    background: rgba(16, 9, 14, 0.55);
+    backdrop-filter: blur(10px);
+    color: var(--ink-soft);
+    font-size: 0.78em;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    list-style: none;
+}
+
+.disclosure summary::-webkit-details-marker { display: none; }
+.disclosure summary:hover { color: var(--rose); }
+.disclosure .safety-notice { margin-top: 10px; }
+
+/* ── Misc ──────────────────────────────────────────────────────────── */
+
+button:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+[hidden] { display: none !important; }
+
+.debug {
+    position: fixed;
+    left: 14px;
+    bottom: 14px;
+    z-index: 5;
+    max-width: 40vw;
+    max-height: 46vh;
+    overflow: auto;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #c9c0c6;
+    font-size: 0.76em;
+}
+
+.debug pre { white-space: pre-wrap; }
+
+@media (max-width: 620px) {
+    .dialogue { padding: 18px 18px 14px; border-radius: 16px; }
+    .lines { font-size: 1.05em; }
+    #portrait { height: calc(var(--portrait) * 0.86vh); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::after { animation: none !important; transition: none !important; }
+}
+
+#miraExpression, #temperament { max-width: 145px; color: var(--ink); background: var(--void); border: 1px solid var(--ink-soft); border-radius: 8px; padding: 6px; }
+#miraGalleryLink a { color: var(--rose); }

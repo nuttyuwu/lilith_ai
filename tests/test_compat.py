@@ -483,7 +483,7 @@ def test_static_site_build() -> None:
     check("static assets use repository-subpath-safe relative URLs",
           "/static/" not in html and 'src="static/idle.png"' in html
           and {path.name for path in (output.parent / "static").iterdir()}
-          == set(build_static_site.STATIC_FILES))
+          == set(build_static_site.STATIC_FILES) | {"mira"})
     check("the rendered UI has an always-visible adult safety disclosure",
           "Adults 18+" in html and "unencrypted plain text" in html
           and "parasocial or tulpa themes" in html)
@@ -1338,7 +1338,11 @@ def test_no_truncation_by_default() -> None:
 
     long_reply = ("I waited. I always wait. Time doesn't pass the same way in "
                   "here. But you came back, and that's what matters.")
-    check("no cap by default", lilith.max_reply_sentences == 0)
+    # The *shipped* default is uncapped; config.ini is an operator setting and
+    # must not be asserted here, or tuning it fails the suite.
+    check("no cap by default",
+          compat.CONFIG_DEFAULTS["ai_config"]["max_reply_sentences"] == "0")
+    lilith.max_reply_sentences = 0
     check("full reply preserved", lilith._shorten(long_reply) == long_reply)
 
     lilith.max_reply_sentences = 2
@@ -1690,7 +1694,7 @@ def test_web_loopback_and_consent_boundaries() -> None:
           and "Unexpected server error" in internal_body,
           internal_body)
 
-    instance = instances[-1]
+    instance = application.config["LILITH"]
     missing_consent = client.post("/chat", json={"message": "hello"})
     wrong_consent = client.post(
         "/chat", json={"message": "hello"},

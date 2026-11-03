@@ -76,3 +76,27 @@ class AIInterface_OpenAI:
         if not response.choices:
             return ""
         return response.choices[0].message.content or ""
+
+    def stream_response(self, messages: list):
+        """Yield deltas from an OpenAI-compatible streaming completion."""
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stream=True,
+            )
+        except Exception as exc:
+            logger.error("Streaming chat completion failed: %s", exc)
+            raise RuntimeError(
+                f"Could not reach the model server at {self.base_url} ({exc}). "
+                "In LM Studio: Developer tab -> Start Server, and load a model."
+            ) from exc
+
+        for part in stream:
+            if not part.choices:
+                continue
+            text = getattr(part.choices[0].delta, "content", None)
+            if text:
+                yield text

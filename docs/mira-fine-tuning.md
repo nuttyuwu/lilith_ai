@@ -4,7 +4,7 @@
 
 The deployed model is `Lilith_AI_8B_Q4_0.gguf`, a quantized 8B inference file.
 Its metadata says `Merged_Hf`, architecture `llama`, and provides no original
-base checkpoint identity. Do not guess an adapter-compatible model from its
+base checkpoint identity. Publisher research now identifies Stheno v3.4 as the pre-Lilith base; see [verified provenance](model-provenance.md). A separate Lilith adapter/merged safetensors checkpoint is not published. Do not guess an adapter-compatible model from its
 filename. The PC has an RTX 3060 Laptop GPU with 6144 MiB VRAM, verified with
 `nvidia-smi`.
 
@@ -96,6 +96,6 @@ independence, memory/context use, expression fit, and repetition manually.
    match the actual base model and architecture. Alternatively merge with its
    base checkpoint and convert/quantize the resulting model for deployment.
 
-Training has not been started. Identifying the base checkpoint and collecting
+Training has not been started. The publisher identifies Stheno v3.4 as the pre-Lilith base (see model-provenance.md); deciding whether to train a fresh Mira model on that base and collecting
 approved examples are the concrete next steps; adding more personality text
 alone is not fine-tuning model weights.

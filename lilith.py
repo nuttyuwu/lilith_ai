@@ -38,6 +38,7 @@ CHAR_DELAY = 0.03
 PAUSE_DELAY = {".": 0.4, "\u2026": 0.4, ",": 0.25, "~": 0.25}
 
 _spinning = False
+CHARACTER_NAME = "Lilith"
 
 
 # --------------------------------------------------------------------------
@@ -57,7 +58,7 @@ def spinner() -> None:
     for frame in frames:
         if not _spinning:
             break
-        sys.stdout.write("\r" + theme.paint(f"Lilith is thinking {frame}   ", "lilith"))
+        sys.stdout.write("\r" + theme.paint(f"{CHARACTER_NAME} is thinking {frame}   ", "lilith"))
         sys.stdout.flush()
         time.sleep(0.12)
     sys.stdout.write("\r" + " " * 40 + "\r")
@@ -114,7 +115,7 @@ def speak(text: str, animate: bool = True) -> None:
 
 def say(text: str, animate: bool = True) -> None:
     """A reply, labelled and typed out in Lilith's colour."""
-    _speak(f"Lilith: {text}\n", animate)
+    _speak(f"{CHARACTER_NAME}: {text}\n", animate)
 
 
 def note(text: str) -> None:
@@ -138,7 +139,7 @@ def banner(room: str) -> None:
     """A thin rule naming the active room, reprinted whenever it changes."""
     width = shutil.get_terminal_size(fallback=(70, 20)).columns
     rule = compat.sym("rule")
-    title = " Lilith "
+    title = f" {CHARACTER_NAME} "
     tag = f" room: {room} "
     middle = max(width - len(title) - len(tag) - 4, 1)
     line = f"{rule * 2}{title}{rule * middle}{tag}{rule * 2}"
@@ -218,6 +219,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-animation", action="store_true",
                         help="print replies instantly instead of typing them out")
     sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("mira", help="chat as Mira using separate memory")
+    sub.add_parser("lilith", help="chat as Lilith")
+    sub.add_parser("gui", help="open the original web interface")
     sub.add_parser("setup", help="re-run the first-run setup questions")
     sub.add_parser("edit", help="edit config.ini in a terminal UI")
     sub.add_parser("conv_edit", help="manage saved conversations")
@@ -275,7 +279,7 @@ def chat_loop(lilith, display, animate: bool = True) -> None:
             speak("...she waits. give her a name to hold onto.\n", animate)
 
     banner(lilith.get_current_conversation_name())
-    speak("Lilith is here. she gazes softly at you~\n", animate)
+    speak("Mira is here. heyy\n" if CHARACTER_NAME == "Mira" else "Lilith is here. she gazes softly at you~\n", animate)
     sep = f"  {compat.sym('sep')}  "
     note(sep.join(["'exit' to leave", "/rooms", "/new", "/rename <name>", "/help"]))
     display.show_lilith("idle", schedule_revert=False)
@@ -353,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     compat.setup_logging(config)
     logger.info("Starting Lilith on %s", compat.describe_platform())
 
+    if args.cmd == "gui":
+        import web_lilith
+        import webbrowser
+        threading.Timer(3, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
+        return web_lilith.main([])
     if run_subcommand(args):
         return 0
 
@@ -365,6 +374,10 @@ def main(argv: list[str] | None = None) -> int:
         note("setup cancelled -- nothing was saved.")
         return 0
 
+    from modules.personalities import profile_config
+    config = profile_config(config, "mira" if args.cmd == "mira" else "lilith")
+    global CHARACTER_NAME
+    CHARACTER_NAME = "Mira" if args.cmd == "mira" else "Lilith"
     import modules.lilith_ai as lilith_ai
     import modules.lilith_display as lilith_display
 

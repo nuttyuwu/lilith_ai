@@ -20,17 +20,21 @@ Fixes over the previous version:
 from __future__ import annotations
 
 import argparse
+import hmac
 import ipaddress
+import json
 import logging
 import os
 import sys
 import threading
 from urllib.parse import urlsplit
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-from modules import compat, safety
-from modules.lilith_ai import EXISTENCE_KEYWORDS, LilithAI
+from werkzeug.local import LocalProxy
+from modules.personalities import PROFILES, profile_config
+from modules import compat, conv_mgmt, safety
+from modules.lilith_ai import EXISTENCE_KEYWORDS, LilithAI, MemorySaveError
 
 logger = logging.getLogger(__name__)
 
@@ -165,18 +169,39 @@ def create_app(config=None) -> Flask:
     # An unbounded request body is buffered in full and then fed to the model.
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
+    public_host = os.getenv("LILITH_PUBLIC_HOST", "").strip().lower()
+    public_password = os.getenv("LILITH_WEB_PASSWORD", "")
+    if public_host and len(public_password) < 20:
+        raise ValueError("Public tunnel requires LILITH_WEB_PASSWORD (at least 20 characters)")
+
     @app.before_request
     def require_loopback_request():
         # Binding checks in main() do not protect application-factory users or
         # a WSGI server launched with its own --bind flag. Checking both values
         # blocks direct LAN clients and ordinary local tunnel/reverse-proxy
         # forwarding (loopback peer, public Host).
-        if (not is_loopback_host(request.remote_addr)
-                or not is_loopback_host(request.host, allow_port=True)):
+        public = bool(public_host) and request.host.lower() == public_host
+        if not is_loopback_host(request.remote_addr) or (not public and not is_loopback_host(request.host, allow_port=True)):
             return jsonify({"error": _LOCAL_ONLY_ERROR}), 403
+        if public:
+            auth = request.authorization
+            if not auth or auth.type.lower() != "basic" or auth.username != "khongor" or not hmac.compare_digest((auth.password or "").encode(), public_password.encode()):
+                return Response("Authentication required", 401, {"WWW-Authenticate": 'Basic realm="Lilith", charset="UTF-8"'})
+            origin = request.headers.get("Origin")
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and origin != "https://" + public_host:
+                return jsonify({"error": "Same-origin request required"}), 403
+        if request.headers.get("X-Lilith-Character", "lilith") not in PROFILES:
+            return jsonify({"error": "Choose lilith or mira"}), 400
+        if request.headers.get('X-Lilith-Temperament', 'soft') not in ('soft', 'yandere'):
+            return jsonify({'error': 'Choose soft or yandere'}), 400
 
-    # The web UI never opens a portrait window.
-    lilith = LilithAI(None, config, compat.BASE_DIR)
+    # Load one backend; character histories and locks remain independent.
+    original = LilithAI(None, config, compat.BASE_DIR)
+    mira = LilithAI(None, profile_config(config, "mira"), compat.BASE_DIR, NO_AI=True)
+    mira.client = getattr(original, "client", None)
+    mira._lock = getattr(original, "_lock", threading.RLock())
+    characters = {"lilith": original, "mira": mira}
+    lilith = LocalProxy(lambda: characters[request.headers.get("X-Lilith-Character", "lilith")])
 
     # No wildcard by default. The previous default of "*" meant any website
     # you visited could talk to a Lilith running on your machine and read your
@@ -190,7 +215,8 @@ def create_app(config=None) -> Flask:
 
             CORS(app, resources={
                 path: {"origins": origins}
-                for path in (r"/chat", r"/nickname", r"/health")
+                for path in (r"/chat", r"/chat/stream", r"/nickname", r"/health",
+                             r"/character", r"/capabilities", r"/rooms", r"/history")
             })
         except ImportError:
             logger.warning("flask-cors not installed; cross-origin requests will fail")
@@ -205,7 +231,8 @@ def create_app(config=None) -> Flask:
             "CORS disabled (same-origin only). Only loopback origins may be enabled."
         )
 
-    app.config["LILITH"] = lilith
+    app.config["LILITH"] = original
+    app.config["CHARACTERS"] = characters
 
     # The debug panel renders the full persona and local file paths into the
     # page. That is ~14 KB of system prompt sent to the browser on every load,
@@ -241,6 +268,11 @@ def create_app(config=None) -> Flask:
             context["persona"] = None
         return render_template("index.html", **context)
 
+    @app.route("/character")
+    def character():
+        return jsonify({"character": request.headers.get("X-Lilith-Character", "lilith"),
+                        "user_name": lilith.get_user_name(), "user_name_set": lilith.has_user_name()})
+
     @app.route("/health")
     def health():
         return jsonify({
@@ -262,30 +294,152 @@ def create_app(config=None) -> Flask:
         lilith.set_user_name(new_name[:64])
         return jsonify({"user_name": lilith.get_user_name()})
 
-    @app.route("/chat", methods=["POST"])
-    def chat():
+    def _read_message() -> tuple[str | None, tuple]:
+        """Validate a chat request. Returns (message, error_response)."""
         # This is a per-browser acknowledgement, independent of the CLI's
         # persisted [safety] consent_version. A fresh config records 0 until
         # CLI consent, while the web disclosure separately issues the current
         # version from modules.safety.
         if request.headers.get(SAFETY_CONSENT_HEADER) != SAFETY_CONSENT_VERSION:
-            return jsonify({
+            return None, (jsonify({
                 "error": "Safety consent is required before chatting.",
                 "consent_version": SAFETY_CONSENT_VERSION,
-            }), 428
+            }), 428)
 
         payload = request.get_json(silent=True) or {}
         message = str(payload.get("message") or "").strip()
         if not message:
-            return jsonify({"reply": "", "emotion": "idle",
-                            "error": "message required"}), 400
+            return None, (jsonify({"reply": "", "emotion": "idle",
+                                   "error": "message required"}), 400)
         if len(message) > 8000:
             # /nickname already clamps to 64; this one had no bound at all.
-            return jsonify({"reply": "", "emotion": "idle",
-                            "error": "message too long"}), 413
+            return None, (jsonify({"reply": "", "emotion": "idle",
+                                   "error": "message too long"}), 413)
+        return message, ()
+
+    def _reply_emotion(message: str) -> str:
+        emotion = lilith.get_current_emotion()
+        if lilith.is_existence_question(message):
+            # Asking what Lilith is must not be framed as emotionally harmful
+            # or punished with a disappointed reaction.
+            emotion = "thinking"
+        if request.headers.get("X-Lilith-Character") == "mira" and emotion in lilith.valid_states:
+            return emotion
+        return clamp_emotion(emotion)
+
+    @app.route("/chat/stream", methods=["POST"])
+    def chat_stream():
+        """Server-sent events carrying the reply as it is written.
+
+        Errors are delivered as an ``error`` event inside a 200 response, not
+        as an HTTP status: once the first token has been flushed the status
+        line is long gone, so a mid-stream failure has nowhere else to go.
+        Validation failures, which happen before any byte is sent, keep their
+        real status codes.
+        """
+        message, failure = _read_message()
+        if failure:
+            return failure
+
+        def event(name: str, **fields) -> str:
+            return f"data: {json.dumps({'type': name, **fields})}\n\n"
+
+        def generate():
+            shown = False
+            try:
+                options = {'temperament': request.headers['X-Lilith-Temperament']} if 'X-Lilith-Temperament' in request.headers else {}
+                for kind, value in lilith.reply_stream(message, **options):
+                    if kind == "delta":
+                        shown = bool(value) or shown
+                        yield event("delta", text=value)
+                    else:
+                        yield event("done", reply=value["reply"],
+                                    emotion=_reply_emotion(message))
+            except MemorySaveError as exc:
+                # The words are already on screen; say plainly that the turn
+                # was not remembered rather than let it look saved.
+                logger.error("Streamed turn was not persisted: %s", exc)
+                yield event("error", error=str(exc), shown=shown)
+            except Exception:
+                logger.exception("Streaming reply failed")
+                yield event("error",
+                            error="Lilith could not answer. See app.log for details.")
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                # Without this a reverse proxy may buffer the whole reply and
+                # deliver it in one piece, which looks exactly like no streaming.
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.route("/capabilities")
+    def capabilities():
+        """What this install can actually do, for the settings panel."""
+        return jsonify({
+            "streaming": lilith.can_stream(),
+            "validated_replies": getattr(lilith, 'structured_replies', False),
+            "backend": config["server"].get("server_ai"),
+            "rooms": lilith.list_conversations(),
+            "current_room": lilith.get_current_conversation_name(),
+        })
+
+    @app.route("/rooms", methods=["GET", "POST"])
+    def rooms():
+        if request.method == "GET":
+            return jsonify({
+                "rooms": lilith.list_conversations(),
+                "current": lilith.get_current_conversation_name(),
+            })
+
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action") or "").strip()
+        name = str(payload.get("name") or "").strip()[:64]
+
+        if action in {"create", "switch", "rename", "delete"} and not name:
+            return jsonify({"error": "name required"}), 400
+
+        if action == "create":
+            ok = lilith.create_conversation(name)
+        elif action == "switch":
+            ok = lilith.switch_conversation(name)
+        elif action == "rename":
+            new_name = str(payload.get("new_name") or "").strip()[:64]
+            # rename_conversation pops with a default, so an unknown source
+            # name would quietly create an empty room instead of failing.
+            ok = bool(new_name) and name in lilith.list_conversations() and \
+                conv_mgmt.rename_conversation(lilith, name, new_name)
+        elif action == "delete":
+            ok = lilith.delete_conversation(name)
+        elif action == "clear":
+            lilith.clear_conversation(name or None)
+            ok = True
+        else:
+            return jsonify({"error": "unknown action"}), 400
+
+        if not ok:
+            return jsonify({"error": f"could not {action} that room"}), 409
+        return jsonify({
+            "rooms": lilith.list_conversations(),
+            "current": lilith.get_current_conversation_name(),
+        })
+
+    @app.route("/history")
+    def history_route():
+        return jsonify({"history": lilith.get_history(limit=40)})
+
+    @app.route("/chat", methods=["POST"])
+    def chat():
+        message, failure = _read_message()
+        if failure:
+            return failure
 
         try:
-            reply = lilith.lilith_reply(message)
+            options = {'temperament': request.headers['X-Lilith-Temperament']} if 'X-Lilith-Temperament' in request.headers else {}
+            reply = lilith.lilith_reply(message, **options)
         except Exception:
             # Log the detail, return a generic message: backend exception text
             # can carry the configured base_url, local filesystem paths and,
@@ -295,13 +449,7 @@ def create_app(config=None) -> Flask:
                             "error": "Lilith could not answer. "
                                      "See app.log for details."}), 502
 
-        emotion = lilith.get_current_emotion()
-        if lilith.is_existence_question(message):
-            # Asking what Lilith is must not be framed as emotionally harmful
-            # or punished with a disappointed reaction.
-            emotion = "thinking"
-
-        return jsonify({"reply": reply, "emotion": clamp_emotion(emotion)})
+        return jsonify({"reply": reply, "emotion": _reply_emotion(message)})
 
     @app.errorhandler(500)
     def internal_error(exc):
@@ -409,7 +557,9 @@ class _LazyWSGI:
     def __call__(self, environ, start_response):
         # Enforce this before _ensure(): a remote request must not initialise a
         # model or receive backend/platform details while being rejected.
-        if not _wsgi_request_is_loopback(environ):
+        public = os.getenv("LILITH_PUBLIC_HOST", "").strip().lower()
+        tunnel_request = bool(public) and environ.get("HTTP_HOST", "").lower() == public and is_loopback_host(environ.get("REMOTE_ADDR"))
+        if not _wsgi_request_is_loopback(environ) and not tunnel_request:
             return _local_only_wsgi_response(start_response)
         return self._ensure()(environ, start_response)
 

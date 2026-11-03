@@ -50,6 +50,10 @@ desktop.ini
 *.swp
 
 audit
+# Independent Mira memory and local tunnel credentials
+memory.mira.json*
+*.mira.json*
+.tunnel/
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal

@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 
 import modules._iface as _iface
 import modules.lilith_memory as lilith_memory
-from modules import companionship, compat, persona_guard, safety
+from modules import companionship, compat, persona_guard, safety, streaming, reply_format, character_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,9 @@ class LilithAI:
         NO_AI: bool = False,
     ):
         self.config = config if config is not None else compat.load_config()
+        self.character_name = 'Mira' if self.config['ai_config'].get('character') == 'mira' else 'Lilith'
+        self.valid_states = VALID_STATES + (("blushing", "angry", "sad_confused")
+                                           if self.config["ai_config"].get("character") == "mira" else ())
         self.Lilith_display = Lilith_display
         self.Lilith_mem = lilith_memory.LilithMemory(
             BASE_DIR or compat.BASE_DIR, self.config, DEFAULT_USER_NAME
@@ -152,6 +155,7 @@ class LilithAI:
         self._lock = threading.RLock()
 
         section = self.config["ai_config"]
+        self.structured_replies = section.getboolean('structured_replies', fallback=section.get('character') == 'mira')
         self.max_history_messages = section.getint("max_history_messages", fallback=40)
         # 0 = keep the whole reply. Brevity belongs in the persona, not in a
         # string split, so this now defaults to off.
@@ -418,7 +422,7 @@ class LilithAI:
             logger.info("Dropped %s old turn(s) to fit the context window", dropped)
         return kept
 
-    def _build_payload(self, history: list, prompt: str) -> list:
+    def _build_payload(self, history: list, prompt: str, temperament: str = 'soft') -> list:
         """Assemble the full message list sent to the backend.
 
         The signature stays at two parameters deliberately: tests stub this
@@ -427,6 +431,12 @@ class LilithAI:
         threaded in by the caller.
         """
         system_text = self._system_block(self._companionship_nudge(prompt))
+        system_text += character_runtime.guidance(self.config['ai_config'].get('character', 'lilith'), temperament, self.valid_states, self.structured_replies)
+        joke_context = prompt + '\n' + '\n'.join(turn.get('content', '') for turn in history[-2:])
+        if self.config['ai_config'].get('character') == 'mira' and not re.search(r'\b(?:dollars?|dollores|dollaras|dolloras|money)\b|\$', joke_context, re.I):
+            system_text += '\nThis message is not about the Dollars/Dollores inside joke. Do not mention or copy that joke here; answer the current topic instead.'
+        if character_runtime.scene_stopped(history, prompt):
+            system_text += '\nRoleplay is stopped in this room. Answer plainly out of character, without jealousy or scene acting, until the user explicitly says resume roleplay or start roleplay. Keep the output contract.'
         return (
             [{"role": "system", "content": system_text}]
             + self._fit_history(history, system_text, prompt)
@@ -437,10 +447,12 @@ class LilithAI:
 
     def _extract_state(self, reply: str) -> tuple[str, str | None]:
         """Pull a [state:x] tag out of the reply and strip it from the text."""
+        if getattr(self, 'structured_replies', False):
+            return reply_format.decode(reply, self.valid_states)
         state = None
         for match in _STATE_TAG.finditer(reply):
             candidate = match.group(1).lower()
-            if candidate in VALID_STATES:
+            if candidate in self.valid_states:
                 state = candidate
             else:
                 logger.debug("Unknown state tag %r ignored", candidate)
@@ -457,7 +469,7 @@ class LilithAI:
 
     # -- replying ---------------------------------------------------------
 
-    def lilith_reply(self, prompt: str) -> str:
+    def lilith_reply(self, prompt: str, temperament: str = 'soft') -> str:
         # This runs before backend generation, persona diagnostics, and translation.
         # A prompt-only safety rule could be ignored or rewritten by any of
         # those layers; the fixed response is therefore selected in code.
@@ -479,13 +491,152 @@ class LilithAI:
 
         with self._lock:
             conv_name, history = self._get_current_conv_list()
-            payload = self._build_payload(history, prompt)
-            raw = self._ask(payload)
+            fixed = character_runtime.fixed_reply(prompt, getattr(self, 'character_name', 'Lilith'))
+            if fixed is not None:
+                reply, state = fixed
+                if not self._commit_turn(conv_name, history, prompt, reply):
+                    raise MemorySaveError(_SAVE_ERROR_MESSAGE)
+                self.last_reply, self.last_state = reply, state
+                return reply
+            payload = self._build_payload(history, prompt) if temperament == 'soft' else self._build_payload(history, prompt, temperament)
+            return self._reply_locked(prompt, conv_name, history, payload, temperament)
 
-            # Detect generic service voice for local diagnostics, but never
-            # replace a model reply with a second generation. A style retry
-            # cannot reliably distinguish a harmless phrase from a truthful
-            # identity disclosure, capability limit, or safety refusal.
+    def _reply_locked(self, prompt: str, conv_name: str,
+                      history: list, payload: list, temperament: str = 'soft') -> str:
+        """One whole-reply turn. The caller already holds the lock."""
+        raw = self._ask(payload)
+
+        # Detect generic service voice for local diagnostics, but never
+        # replace a model reply with a second generation. A style retry
+        # cannot reliably distinguish a harmless phrase from a truthful
+        # identity disclosure, capability limit, or safety refusal.
+        if self.persona_guard:
+            leak = persona_guard.find_leak(raw)
+            if leak:
+                logger.info(
+                    "Generic assistant phrasing detected (%r); preserving reply",
+                    leak,
+                )
+
+        reply, state = self._extract_state(raw)
+        reply = self._shorten(reply.strip()) or "..."
+        state = character_runtime.align_emotion(reply, state, temperament, getattr(self, 'valid_states', VALID_STATES))
+
+        if self.translator is not None:
+            try:
+                reply = self.translator.translate(reply)
+            except Exception as exc:
+                logger.warning("Translation failed: %s", exc)
+
+        if not self._commit_turn(conv_name, history, prompt, reply):
+            # The reply is not shown, so do not leave an unseen exchange
+            # in the live context. A later successful turn must not make
+            # Lilith appear to remember words the user never received.
+            logger.error("Reply discarded because conversation memory was not saved")
+            raise MemorySaveError(_SAVE_ERROR_MESSAGE)
+
+        self.last_reply = reply
+        self.last_state = state
+        return reply
+
+    def _ask(self, payload: list) -> str:
+        try:
+            if getattr(self, 'structured_replies', False):
+                method = getattr(self.client, 'get_structured_response', None)
+                if callable(method):
+                    return (method(payload, reply_format.schema(self.valid_states)) or '').strip()
+            return (self.client.get_response(payload) or "").strip()
+        except Exception:
+            logger.exception("Backend call failed")
+            raise
+
+    # -- streaming --------------------------------------------------------
+
+    def can_stream(self) -> bool:
+        """Whether replies can be shown as they are generated.
+
+        Translation is deliberately disqualifying. It rewrites the finished
+        sentence, so a streamed turn would show source-language text and then
+        replace it -- worse than waiting. Those turns fall back to one delta.
+        """
+        if self.client is None or self.translator is not None:
+            return False
+        return bool(self.client.supports_streaming())
+
+    def reply_stream(self, prompt: str, temperament: str = 'soft'):
+        """Generate a reply incrementally.
+
+        Yields ``("delta", text)`` as the words arrive and finally exactly one
+        ``("done", info)`` carrying the complete reply, state and emotion.
+
+        The turn is committed to memory only after the last token, exactly as
+        in :meth:`lilith_reply`. The difference that matters is what a failed
+        save means: the words are already on screen and cannot be recalled, so
+        the history rollback still happens but ``MemorySaveError`` is raised
+        *after* the text was shown. Callers must report it rather than let the
+        user believe a turn was remembered when it was not.
+        """
+        fixed_safety_reply = safety.crisis_response(prompt)
+        if fixed_safety_reply is not None:
+            # Never dripped out a word at a time: crisis resources should
+            # appear at once, complete, and are not persisted.
+            logger.warning("Deterministic crisis response selected")
+            self.last_reply = fixed_safety_reply
+            self.last_state = "thinking_sad"
+            yield "delta", fixed_safety_reply
+            yield "done", self._stream_result(fixed_safety_reply, "thinking_sad")
+            return
+
+        if self.client is None:
+            logger.error("reply_stream called in NO_AI mode")
+            yield "delta", "..."
+            yield "done", self._stream_result("...", None)
+            return
+
+        with self._lock:
+            conv_name, history = self._get_current_conv_list()
+            fixed = character_runtime.fixed_reply(prompt, getattr(self, 'character_name', 'Lilith'))
+            if fixed is not None:
+                reply, state = fixed
+                if not self._commit_turn(conv_name, history, prompt, reply):
+                    raise MemorySaveError(_SAVE_ERROR_MESSAGE)
+                self.last_reply, self.last_state = reply, state
+                yield 'delta', reply
+                yield 'done', self._stream_result(reply, state)
+                return
+            payload = self._build_payload(history, prompt) if temperament == 'soft' else self._build_payload(history, prompt, temperament)
+
+            if not self.can_stream() or (self.structured_replies and callable(getattr(self.client, 'get_structured_response', None))):
+                reply = self._reply_locked(prompt, conv_name, history, payload, temperament)
+                yield "delta", reply
+                yield "done", self._stream_result(reply, self.last_state)
+                return
+
+            filter_type = reply_format.ValidatedStream if self.structured_replies else streaming.ReplyStream
+            filt = filter_type(self.max_reply_sentences, self.valid_states)
+            raw = ""
+            tokens = self.client.stream_response(payload)
+            try:
+                # Generation deliberately runs to completion even once the
+                # sentence cap has been reached. The [state:x] tag is the last
+                # thing Lilith writes, so cutting the stream at the cap would
+                # cost the portrait its expression -- and max_tokens already
+                # bounds what the tail can cost.
+                for chunk in tokens:
+                    raw += chunk
+                    delta = filt.feed(chunk)
+                    if delta:
+                        yield "delta", delta
+            finally:
+                close = getattr(tokens, "close", None)
+                if close is not None:
+                    close()
+
+            tail = filt.finish()
+            filt.state = character_runtime.align_emotion(filt.text, filt.state, temperament, self.valid_states)
+            if tail:
+                yield "delta", tail
+
             if self.persona_guard:
                 leak = persona_guard.find_leak(raw)
                 if leak:
@@ -494,39 +645,39 @@ class LilithAI:
                         leak,
                     )
 
-            reply, state = self._extract_state(raw)
-            reply = self._shorten(reply.strip()) or "..."
+            reply = filt.text.strip() or "..."
+            self.last_reply = reply
+            self.last_state = filt.state
 
-            if self.translator is not None:
-                try:
-                    reply = self.translator.translate(reply)
-                except Exception as exc:
-                    logger.warning("Translation failed: %s", exc)
-
-            new_turns = [
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": reply},
-            ]
-            history.extend(new_turns)
-            self.memory["conversations"][conv_name] = history
-            if not self.Lilith_mem.save_memory(self.memory):
-                # The reply is not shown, so do not leave an unseen exchange
-                # in the live context. A later successful turn must not make
-                # Lilith appear to remember words the user never received.
-                del history[-len(new_turns):]
-                logger.error("Reply discarded because conversation memory was not saved")
+            saved = self._commit_turn(conv_name, history, prompt, reply)
+            result = self._stream_result(reply, filt.state)
+            yield "done", result
+            if not saved:
+                logger.error("Streamed reply was shown but not saved")
                 raise MemorySaveError(_SAVE_ERROR_MESSAGE)
 
-            self.last_reply = reply
-            self.last_state = state
-            return reply
+    def _stream_result(self, reply: str, state: str | None) -> dict:
+        return {
+            "reply": reply,
+            "state": state,
+            "emotion": self.get_current_emotion(),
+        }
 
-    def _ask(self, payload: list) -> str:
-        try:
-            return (self.client.get_response(payload) or "").strip()
-        except Exception:
-            logger.exception("Backend call failed")
-            raise
+    def _commit_turn(self, conv_name: str, history: list,
+                     prompt: str, reply: str) -> bool:
+        """Append a finished exchange to memory. False when the save failed."""
+        new_turns = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": reply},
+        ]
+        history.extend(new_turns)
+        self.memory["conversations"][conv_name] = history
+        if self.Lilith_mem.save_memory(self.memory):
+            return True
+        # Keep the live context honest: an exchange that was not persisted must
+        # not influence later turns as though it had been.
+        del history[-len(new_turns):]
+        return False
 
     # -- conversation management -----------------------------------------
 
@@ -618,4 +769,10 @@ class LilithAI:
 
     @staticmethod
     def is_existence_question(text: str) -> bool:
-        return bool(_EXISTENCE_RE.search((text or "").lower()))
+        text = (text or '').lower()
+        matches = list(_EXISTENCE_RE.finditer(text))
+        if (matches and all(match.group(0) == 'fictional' for match in matches)
+                and re.search(r'\b(?:scene|roleplay|story|anime)\b', text)
+                and not re.search(r'\b(?:are you|you are|you.re|what are you|who are you)\b', text)):
+            return False
+        return bool(matches)

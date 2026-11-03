@@ -661,6 +661,38 @@ go find them. i'll still be here after.
 
 -Lilith~
 
+
+### Lilith / Mira personality selection
+
+Run `python lilith.py gui` (or `lilith.bat gui`) to open the original web UI.
+On the first browser launch choose **Lilith or Mira**; the choice is remembered
+in that browser. Switch later in Settings or type `/mira` or `/lilith`.
+The portrait and scene remain the original Lilith interface. Mira uses the full
+`mira_persona.txt` high-fidelity character specification: short informal Discord
+messages, independent opinions, no automatic apologies, and no invented romantic
+rival storyline. All characters are adults. The relationship period stays
+unspecified until established in chat, with no assumed reunion or reconciliation.
+`stop roleplay` leaves the scene immediately.
+
+For terminal chat run `python lilith.py mira` or `python lilith.py lilith`.
+Both use the configured model. Mira's memory is stored next to the configured
+memory file with `.mira` added before its extension; original Lilith memory stays
+in its existing file. Browser requests select the character independently, so
+switching one browser does not switch another browser. Rooms are character specific.
+
+Optional named tunnel support accepts only the exact host in `LILITH_PUBLIC_HOST`
+and only through a loopback connector. Set it to `lilith.lil4kh.uk` and set
+`LILITH_WEB_PASSWORD` to a private password of at least 20 characters before starting
+the server. Public requests use HTTP Basic authentication (username `khongor`),
+including history and settings. Serve the public URL over HTTPS. Point the
+Cloudflare tunnel to `http://127.0.0.1:5000` and preserve the public Host header;
+do not rewrite it to localhost. Connector installation and DNS routing are configured separately.
+Without these environment variables the app remains localhost only.
+
+Mira now has a hand-drawn portrait and nine transparent animated WebP expressions in `static/mira/`. In Settings use **Mira expressions** to preview each mood, or open `static/mira/preview.html` for the downloadable animation gallery. The Blinking option enables the loops; turning it off or requesting reduced motion uses static PNGs. The original Lilith artwork is retained.
+
+Each Mira expression now has its own matching closed-eye frame (`*_blink.png`). Animated WebP loops and the desktop viewer preserve the current mouth, brows, and emotion during blinking. Animation URLs are versioned so refreshed clients do not reuse the earlier shared-smile blink.
+
 ### Reliable storage and hosting
 
 Set `[ai_config] memory = memory.sqlite3` to use transactional SQLite storage.
@@ -700,3 +732,32 @@ legacy JSON is the state at migration time and does not contain subsequent chats
 
 The supervisor detects process exits, not every possible application hang.
 It does not keep a sleeping or powered-off computer online.
+
+### Temperament and validated expressions
+
+Settings → Character → **Temperament** selects **Soft** or **Yandere**.
+Soft is the default gentle style; Yandere is a fictional anime-style variation
+with theatrical jealousy, sharp reactions, and angry outbursts. Each browser
+remembers its choice separately for Lilith and Mira. The choice travels with
+each request rather than mutating a shared personality. Switching modes takes
+effect on the next message.
+
+Mira requests a JSON object with separate dialogue and expression fields.
+The local llama.cpp backend constrains generation with a JSON schema; other
+backends use the prompt contract and the same validation. The schema follows
+the official [llama-cpp-python JSON mode](https://llama-cpp-python.readthedocs.io/en/stable/#json-and-json-schema-mode).
+Invalid/incomplete objects are rejected before display or storage. Unknown
+expressions become neutral; older plain/tagged model responses remain compatible.
+Structured replies are buffered until validation completes, so the streaming
+setting explains that text and expression arrive together. Original Lilith
+token streaming remains available. Set `structured_replies = true` explicitly
+to enable the same format for Lilith too.
+
+Direct identity/audio questions have honest text-only answers. `stop roleplay`
+ends the scene immediately, and the room remains out of character until
+`resume roleplay` or `start roleplay`. Temperament does not change those controls.
+
+Run `python evaluate_character.py` for repeatable real-model personality probes.
+Evaluation uses disposable memory and CPU inference without modifying personal
+history. Its report includes replies, expressions, and checks for human review;
+automatic checks do not guarantee every future response's quality.

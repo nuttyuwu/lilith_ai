@@ -69,8 +69,36 @@ class AIInterface_Ollama:
                 f"and have you pulled the model with 'ollama pull {self.model}'?"
             ) from exc
 
-        # Newer ollama clients return an object; older ones a plain dict.
+        return self._content(response)
+
+    @staticmethod
+    def _content(response) -> str:
+        """Newer ollama clients return an object; older ones a plain dict."""
         message = getattr(response, "message", None)
         if message is not None:
             return getattr(message, "content", "") or ""
         return (response.get("message") or {}).get("content", "") or ""
+
+    def stream_response(self, messages: list):
+        """Yield chunks from Ollama's streaming chat endpoint."""
+        try:
+            stream = self._chat(
+                model=self.model,
+                messages=messages,
+                options={
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens,
+                },
+                stream=True,
+            )
+        except Exception as exc:
+            logger.error("Ollama stream request failed: %s", exc)
+            raise RuntimeError(
+                f"Could not reach Ollama ({exc}). Is 'ollama serve' running, "
+                f"and have you pulled the model with 'ollama pull {self.model}'?"
+            ) from exc
+
+        for part in stream:
+            text = self._content(part)
+            if text:
+                yield text

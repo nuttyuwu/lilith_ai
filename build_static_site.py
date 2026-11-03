@@ -31,11 +31,13 @@ PUBLIC_DIR = compat.project_path("public")
 # files (for example current.png) and may contain private local leftovers. A
 # release artifact must be identical in every checkout.
 STATIC_FILES = (
+    "app.js",
     "blinking.png",
     "cheeky.png",
     "config.js",
     "dissapointed.png",
     "idle.png",
+    "lilith.css",
     "sad.png",
     "smile.png",
     "talking.png",
@@ -76,6 +78,17 @@ def build(api_base: str | None = None) -> Path:
         if not source.is_file():
             raise FileNotFoundError(f"Required static asset is missing: {filename}")
         shutil.copy2(source, static_dest / filename)
+
+    for collection in ("", "yandere"):
+        mira_source = compat.project_path("static", "mira") / collection
+        mira_dest = static_dest / "mira" / collection
+        mira_dest.mkdir(parents=True, exist_ok=True)
+        for state in ("idle", "blinking", "blushing", "thinking", "smiling", "sad", "confused", "sad_confused", "angry"):
+            for extension in ("png", "webp"):
+                shutil.copy2(mira_source / f"{state}.{extension}", mira_dest)
+        for state in ("idle", "blushing", "thinking", "smiling", "sad", "confused", "sad_confused", "angry"):
+            shutil.copy2(mira_source / f"{state}_blink.png", mira_dest)
+        shutil.copy2(mira_source / "preview.html", mira_dest)
 
     # Point the static page at a public API endpoint, if one was provided.
     api_base = (api_base if api_base is not None

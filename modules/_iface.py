@@ -100,6 +100,30 @@ class AIInterface:
         response = self.imp.get_response(messages)
         return response if isinstance(response, str) else ""
 
+    def supports_streaming(self) -> bool:
+        """Whether this backend can emit tokens as they are produced."""
+        return callable(getattr(self.imp, "stream_response", None))
+
+    def get_structured_response(self, messages, schema):
+        method = getattr(self.imp, 'get_structured_response', None)
+        return method(messages, schema) if method is not None else self.get_response(messages)
+
+    def stream_response(self, messages: list):
+        """Yield reply fragments in order.
+
+        A backend without token streaming is not an error: it yields the whole
+        reply as a single fragment, so callers never need a second code path.
+        """
+        streamer = getattr(self.imp, "stream_response", None)
+        if streamer is None:
+            whole = self.get_response(messages)
+            if whole:
+                yield whole
+            return
+        for chunk in streamer(messages):
+            if isinstance(chunk, str) and chunk:
+                yield chunk
+
     def count_tokens(self, text: str):
         """Exact token count, or None when the backend cannot say.
 

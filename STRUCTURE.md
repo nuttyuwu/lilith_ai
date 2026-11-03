@@ -320,6 +320,32 @@ had been mangled.
 
 `normalise_backend()` accepts `LM studio`, `lm_studio`, `LMStudio` as one value.
 
+### Streaming
+
+All four backends implement `stream_response(messages)` alongside
+`get_response`. `AIInterface.stream_response` fills in for any that does not by
+yielding the whole reply as one fragment, so callers never need two code paths;
+`supports_streaming()` says which is happening.
+
+`LilithAI.reply_stream()` drives it and yields `("delta", text)` then one
+`("done", info)`. The post-processing that the whole-reply path does at the end
+— stripping `[state:x]`, trimming whitespace, applying the sentence cap — has to
+happen a character at a time instead, because shown text cannot be taken back.
+That lives in [streaming.py](modules/streaming.py), and
+[tests/test_streaming.py](tests/test_streaming.py) pins the property that makes
+it safe: feeding a reply through in *any* chunking yields exactly what the
+whole-reply pipeline produces, so what the user watched appear is byte-identical
+to what is saved.
+
+Two deliberate calls:
+
+- **Generation runs past the sentence cap.** The `[state:x]` tag is written
+  last, after the sentences the cap discards, so stopping early would cost the
+  portrait its expression. `max_tokens` already bounds the tail.
+- **An enabled translator disables streaming** (`can_stream()` returns False).
+  Translation rewrites the finished sentence, so a streamed turn would show
+  source-language text and then replace it — worse than waiting.
+
 Every backend defers its heavy third-party import into `__init__`/`load()`, so
 merely *selecting* a backend never pays for torch. That means importing the
 wrapper module can't fail, and the whole construction chain — not just
@@ -390,9 +416,21 @@ into an opaque gunicorn worker boot error.
 | Route | Purpose |
 |---|---|
 | `GET /` | The page |
-| `POST /chat` | `{message}` → `{reply, emotion}` |
+| `POST /chat` | `{message}` → `{reply, emotion}` — whole reply |
+| `POST /chat/stream` | Same input, server-sent `delta` / `done` / `error` events |
+| `GET /capabilities` | Whether streaming is possible, backend name, room list |
 | `GET/POST /nickname` | Read or set the user's name |
+| `GET/POST /rooms` | List rooms, or `create` / `switch` / `rename` / `clear` / `delete` |
+| `GET /history` | Last 40 turns of the active room, for the transcript panel |
 | `GET /health` | Status, platform, backend, active room |
+
+`/chat/stream` reports mid-stream failures as an `error` **event inside a 200
+response**, not as a status code: once the first token has been flushed the
+status line is already gone. Validation failures happen before any byte is
+written and keep their real codes (428 without consent, 400/413 for the body).
+An `error` event carrying `shown: true` is the one case that matters — her words
+did arrive but the turn could not be written to memory, so the page says so
+rather than letting a lost exchange look remembered.
 
 Security posture, all deliberate:
 
@@ -477,12 +515,15 @@ reported as a finding rather than aborting the run.
 | `config.example.ini` | yes | The documented template. |
 | `memory.json` | no | Conversations. Never commit someone else's memories. |
 | `lilith_persona.txt` | yes | The system prompt. ~14 KB. Path set by `[ai_config] persona`. |
+| `lilith_persona_compact.txt` | yes | The compact system prompt, ~3.5 KB. Same voice, a fifth of the context, harder brevity rule, no AI/assistant wording. Currently the default in `config.ini`. |
 | `voice_persona.txt` | yes | A shorter persona draft. **No code reads it** — point `[ai_config] persona` at it to use it. |
 | `lilith_lines.txt` | yes | Five sample lines. **No code reads it**; reference material only. |
 | `app.log` | no | Rotating, UTF-8, 1 MB × 3. |
 | `models/` | no | GGUF weights, multi-gigabyte. |
 | `assets/room/`, `assets/glass/` | yes | The two portrait sets; redistribution rights are unresolved in `ASSET_LICENSES.md`. |
 | `static/` | yes | Web copies of the glass assets; the duplication is intentional, but rights remain unresolved. |
+| `static/lilith.css` | yes | The web theme: soft pink on black, portrait-centred visual-novel layout. |
+| `static/app.js` | yes | The web client. `templates/index.html` holds markup plus a small server-rendered bootstrap block; behaviour lives here. |
 | `public/` | no | Deterministic allowlisted output from `build_static_site.py`; CI validates it locally and never publishes it. |
 | `SAFETY.md`, `PRIVACY.md` | yes | Adult fictional-roleplay boundary, deterministic crisis limits, plaintext storage, backend data flow, and deletion guidance. |
 | `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` | yes | Vulnerability reporting and project participation policy. |
